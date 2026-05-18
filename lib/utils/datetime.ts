@@ -1,3 +1,18 @@
+/**
+ * Normalize an ISO datetime string for Date parsing.
+ *
+ * The backend persists timestamps as naive UTC (`datetime.now(tz=UTC).replace(tzinfo=None)`)
+ * and pydantic serializes them without a tz suffix (e.g. `2026-05-18T11:37:06`).
+ * The JS Date constructor would then interpret them as LOCAL time, which is
+ * wrong by the local browser's UTC offset. Force a UTC interpretation when no
+ * tz suffix is present.
+ */
+function normalizeIsoAsUtc(value: string): string {
+  // Already has a tz offset (`Z`, `+09:00`, `-05:30`, etc.) — leave as-is.
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) return value;
+  return value + "Z";
+}
+
 /** Format an ISO timestamp in Asia/Seoul, used by all admin pub-reservation views. */
 export function formatKstDateTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -10,7 +25,7 @@ export function formatKstDateTime(value: string | null | undefined): string {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-    }).format(new Date(value));
+    }).format(new Date(normalizeIsoAsUtc(value)));
   } catch {
     return value;
   }
@@ -25,7 +40,7 @@ export function formatKstTime(value: string | null | undefined): string {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-    }).format(new Date(value));
+    }).format(new Date(normalizeIsoAsUtc(value)));
   } catch {
     return value;
   }

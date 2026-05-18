@@ -16,7 +16,7 @@ import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
 import { api, ApiError } from "@/lib/api/client";
 import {
-  displayPhone,
+  displayFullPhone,
   type AdminReservation,
   type AdminReservationListResponse,
 } from "@/lib/api/types";
@@ -105,7 +105,7 @@ function ReservationRow({
           <dt className="text-xs font-bold uppercase text-slate-500">예약자</dt>
           <dd className="font-black">{reservation.contact_name}</dd>
           <dd className="text-xs text-slate-600">
-            {displayPhone(reservation.contact_phone_masked) || "—"}
+            {displayFullPhone(reservation.contact_phone, reservation.contact_phone_masked) || "—"}
           </dd>
         </div>
         <div>
@@ -141,7 +141,7 @@ function ReservationRow({
                     : g.name ?? "—"}
                 </span>
                 <span className="text-xs text-slate-600">
-                  {g.guest_type === "clubx" ? "ClubX" : displayPhone(g.phone_masked)}
+                  {g.guest_type === "clubx" ? "ClubX" : displayFullPhone(g.phone, g.phone_masked)}
                 </span>
               </li>
             ))}

@@ -6,6 +6,8 @@ export type AdminGuest = {
   guest_type: "non_clubx" | "clubx";
   name: string | null;
   phone_masked: string | null;
+  /** Unmasked phone (POS admin view only). */
+  phone?: string | null;
   user_id: string | null;
   username: string | null;
   display_name: string | null;
@@ -27,6 +29,8 @@ export type AdminReservation = {
   clubx_count: number;
   contact_name: string;
   contact_phone_masked: string;
+  /** Unmasked phone (POS admin view only). */
+  contact_phone?: string | null;
   created_at: string;
   guests: AdminGuest[];
 };
@@ -55,6 +59,8 @@ export type AdminWaitlistEntry = {
   preferred_end_label: string | null;
   name: string;
   phone_masked: string;
+  /** Unmasked phone (POS admin view only). */
+  phone?: string | null;
   party_size: number;
   required_tables: number;
   status: WaitlistStatus | string;
@@ -86,6 +92,8 @@ export type AdminWaitlistNextCallableEntry = {
   waiting_code: string;
   name: string;
   phone_masked: string;
+  /** Unmasked phone (POS admin view only). */
+  phone?: string | null;
   party_size: number;
   required_tables: number;
 };
@@ -108,4 +116,17 @@ export function displayPhone(value: string | null | undefined): string {
   if (digits.length <= 3) return digits;
   if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
   return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
+/**
+ * POS admin views show the full unmasked phone when available; fall back to
+ * the masked value (e.g. `010-****-5739`) only when the backend did not
+ * supply a raw phone (older records or non-admin endpoints).
+ */
+export function displayFullPhone(
+  raw: string | null | undefined,
+  masked: string | null | undefined,
+): string {
+  if (raw) return displayPhone(raw);
+  return displayPhone(masked);
 }

@@ -16,7 +16,7 @@ import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { api, ApiError } from "@/lib/api/client";
 import {
-  displayPhone,
+  displayFullPhone,
   type AdminWaitlistCallNextResponse,
   type AdminWaitlistEntry,
   type AdminWaitlistListResponse,
@@ -178,7 +178,7 @@ function WaitlistRow({
         <div>
           <dt className="text-xs font-bold uppercase text-slate-500">이름</dt>
           <dd className="font-black">{entry.name}</dd>
-          <dd className="text-xs text-slate-600">{displayPhone(entry.phone_masked)}</dd>
+          <dd className="text-xs text-slate-600">{displayFullPhone(entry.phone, entry.phone_masked)}</dd>
         </div>
         <div>
           <dt className="text-xs font-bold uppercase text-slate-500">인원</dt>
