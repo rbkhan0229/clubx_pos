@@ -11,7 +11,6 @@ import {
   LinkIcon,
   RefreshCw,
   Settings,
-  ShieldAlert,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -21,7 +20,6 @@ import {
   api,
   ApiError,
   apiFetch,
-  getAdminToken,
   getApiBase,
 } from "@/lib/api/client";
 import type {
@@ -50,8 +48,8 @@ function describeError(err: unknown): LoadError {
   if (err instanceof ApiError) {
     if (err.status === 401 || err.status === 403) {
       return {
-        title: "관리자 토큰이 유효하지 않거나 만료되었습니다.",
-        message: "설정 화면에서 관리자 계정으로 다시 로그인하거나 유효한 토큰을 저장하세요.",
+        title: "운영 API 접근이 거부되었습니다.",
+        message: "백엔드 배포가 최신인지, POS 운영 API가 무토큰 모드로 열려 있는지 확인하세요.",
       };
     }
     if (err.status === 0) {
@@ -208,7 +206,6 @@ function EmptyState({ children }: { children: ReactNode }) {
 export default function CounterAdminPage() {
   const router = useRouter();
   const [apiBase, setApiBase] = useState("");
-  const [hasToken, setHasToken] = useState(false);
   const [connection, setConnection] = useState<"idle" | "ok" | "failed">(
     "idle",
   );
@@ -269,19 +266,6 @@ export default function CounterAdminPage() {
   }, []);
 
   const loadAdminData = useCallback(async () => {
-    const token = getAdminToken();
-    setHasToken(Boolean(token));
-    if (!token) {
-      setReservations(null);
-      setWaitlist(null);
-      setOverview(null);
-      setAdminError({
-        title: "관리자 토큰이 없습니다.",
-        message: "설정 화면에서 관리자 계정으로 로그인하거나 관리자 토큰을 저장하세요.",
-      });
-      return;
-    }
-
     setAdminLoading(true);
     setAdminError(null);
     try {
@@ -308,7 +292,6 @@ export default function CounterAdminPage() {
 
   const refresh = useCallback(async () => {
     setApiBase(getApiBase() || "설정되지 않음");
-    setHasToken(Boolean(getAdminToken()));
     await Promise.all([loadConnection(), loadAdminData()]);
     setLastRefreshed(new Date().toLocaleTimeString());
   }, [loadAdminData, loadConnection]);
@@ -359,11 +342,11 @@ export default function CounterAdminPage() {
           tone={apiBase ? "default" : "danger"}
         />
         <StatusCard
-          icon={hasToken ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
-          label="관리자 토큰"
-          value={hasToken ? "저장됨" : "없음"}
-          helper="브라우저 저장소 키: clubx_admin_token"
-          tone={hasToken ? "good" : "warn"}
+          icon={<ShieldCheck size={20} />}
+          label="운영 접근"
+          value="토큰 불필요"
+          helper="POS 운영 화면에서 바로 조회/처리합니다"
+          tone="good"
         />
         <StatusCard
           icon={<DatabaseZap size={20} />}
@@ -391,29 +374,6 @@ export default function CounterAdminPage() {
           helper="운영자가 필요할 때 직접 최신 상태를 불러옵니다"
         />
       </section>
-
-      {!hasToken ? (
-        <section className="mb-5 rounded-3xl border border-amber-200 bg-amber-50 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-black text-amber-900">
-                관리자 토큰이 없습니다. 설정 화면에서 관리자 계정으로 로그인하거나 토큰을 저장하세요.
-              </p>
-              <p className="mt-1 text-sm font-semibold text-amber-800">
-                백엔드 연결 상태는 익명으로 확인할 수 있지만, 예약과 대기열 데이터는
-                관리자 bearer 토큰이 있어야 불러올 수 있습니다.
-              </p>
-            </div>
-            <Button
-              icon={<Settings size={18} />}
-              onClick={() => router.push("/counter/settings")}
-              variant="secondary"
-            >
-              설정 열기
-            </Button>
-          </div>
-        </section>
-      ) : null}
 
       <section className="mb-5 grid gap-4 lg:grid-cols-[1fr_1fr]">
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm">

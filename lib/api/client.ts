@@ -2,34 +2,13 @@
  * Thin fetch wrapper for the ClubX backend (KUBA-LMS).
  *
  * - Base URL comes from `NEXT_PUBLIC_CLUBX_API_BASE`.
- * - Admin bearer token is read from `localStorage.clubx_admin_token`.
  * - All responses are parsed as JSON; non-2xx throws an Error with a readable message.
  */
 
-const TOKEN_KEY = "clubx_admin_token";
 const API_BASE = process.env.NEXT_PUBLIC_CLUBX_API_BASE ?? "";
 
 export function getApiBase(): string {
   return API_BASE.replace(/\/+$/, "");
-}
-
-export function getAdminToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setAdminToken(token: string): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(TOKEN_KEY, token.trim());
-}
-
-export function clearAdminToken(): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(TOKEN_KEY);
 }
 
 export class ApiError extends Error {
@@ -47,7 +26,6 @@ type FetchOptions = {
   method?: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;
-  // If true, do not attach the Authorization header.
   anonymous?: boolean;
 };
 
@@ -74,13 +52,9 @@ export async function apiFetch<T = unknown>(
   path: string,
   options: FetchOptions = {},
 ): Promise<T> {
-  const { method = "GET", body, query, anonymous = false } = options;
+  const { method = "GET", body, query } = options;
 
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (!anonymous) {
-    const token = getAdminToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
   let response: Response;
