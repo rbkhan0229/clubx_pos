@@ -6,6 +6,7 @@ import type { Order, OrderItem } from "@/types";
 type NewOrderInput = {
   sessionId: string;
   visitId: string;
+  orderedBy?: Order["orderedBy"];
   items: Array<Pick<OrderItem, "menuItemId" | "menuName" | "unitPrice" | "quantity">>;
 };
 
@@ -75,7 +76,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       },
     }));
   },
-  createOrder: ({ sessionId, visitId, items }) => {
+  createOrder: ({ sessionId, visitId, orderedBy, items }) => {
     const current = get().ordersBySession[sessionId] ?? [];
     const now = new Date().toISOString();
     const order: Order = {
@@ -83,7 +84,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       sessionId,
       visitId,
       orderNumber: current.length + 1,
-      orderedBy: {
+      orderedBy: orderedBy ?? {
         type: "counter",
         name: "Counter",
       },

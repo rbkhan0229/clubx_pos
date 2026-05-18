@@ -146,6 +146,16 @@ export type PaymentItem = {
   discountAmount?: number;
 };
 
+export type StaffDevice = {
+  id: string;
+  sessionId: string;
+  activationCode: string;
+  staffName: string;
+  deviceName?: string;
+  connectedAt: string;
+  status: "active" | "kicked";
+};
+
 export type SidebarTab =
   | "reservation"
   | "waiting"

@@ -1,5 +1,12 @@
-import { PlaceholderScreen } from "@/components/common/PlaceholderScreen";
+import { HandyWorkspace } from "@/components/handy/HandyWorkspace";
 
-export default function HandySessionPage() {
-  return <PlaceholderScreen titleKey="handyCanvas" />;
+type HandySessionPageProps = {
+  params: Promise<{
+    sessionId: string;
+  }>;
+};
+
+export default async function HandySessionPage({ params }: HandySessionPageProps) {
+  const { sessionId } = await params;
+  return <HandyWorkspace sessionId={sessionId} />;
 }

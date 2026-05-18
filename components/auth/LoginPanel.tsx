@@ -9,6 +9,7 @@ import { Input } from "@/components/common/Input";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { cn } from "@/lib/utils/cn";
 import { useAppStore } from "@/stores/useAppStore";
+import { useHandyStore } from "@/stores/useHandyStore";
 import type { Mode } from "@/types";
 
 const modeConfig = {
@@ -28,6 +29,8 @@ export function LoginPanel() {
   const router = useRouter();
   const language = useAppStore((state) => state.language);
   const setMockLogin = useAppStore((state) => state.setMockLogin);
+  const loadHandyState = useHandyStore((state) => state.loadHandyState);
+  const connectDevice = useHandyStore((state) => state.connectDevice);
   const t = getDictionary(language);
   const [mode, setMode] = useState<Mode | null>(null);
   const [error, setError] = useState("");
@@ -49,17 +52,19 @@ export function LoginPanel() {
 
   function handleHandySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    loadHandyState();
     const form = new FormData(event.currentTarget);
     const code = String(form.get("activationCode") ?? "").trim();
     const staffName = String(form.get("staffName") ?? "").trim();
 
-    if (code.toUpperCase() !== "CLUBX" || !staffName) {
-      setError(t.invalidLogin);
+    const device = connectDevice(code, staffName);
+    if (!device) {
+      setError(!staffName ? t.invalidLogin : t.invalidActivationCode);
       return;
     }
 
     setMockLogin("handy", staffName);
-    router.push("/handy/session/mock-session");
+    router.push(`/handy/session/${device.sessionId}`);
   }
 
   return (

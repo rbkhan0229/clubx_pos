@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   CalendarClock,
   Hourglass,
@@ -9,7 +10,11 @@ import {
 } from "lucide-react";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { useAppStore } from "@/stores/useAppStore";
+import { useHandyStore } from "@/stores/useHandyStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
+import { Button } from "@/components/common/Button";
+import { Modal } from "@/components/common/Modal";
+import type { StaffDevice } from "@/types";
 import type { SidebarTab } from "@/types";
 
 const tabs: Array<{
@@ -44,7 +49,7 @@ const tabs: Array<{
   },
 ];
 
-export function RightSidebar() {
+export function RightSidebar({ sessionId }: { sessionId: string }) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const sidebarOpen = useWorkspaceStore((state) => state.sidebarOpen);
@@ -81,14 +86,14 @@ export function RightSidebar() {
         </div>
 
         <div className="flex-1 p-4">
-          <SidebarContent activeTab={activeSidebarTab} />
+          <SidebarContent activeTab={activeSidebarTab} sessionId={sessionId} />
         </div>
       </div>
     </aside>
   );
 }
 
-function SidebarContent({ activeTab }: { activeTab: SidebarTab }) {
+function SidebarContent({ activeTab, sessionId }: { activeTab: SidebarTab; sessionId: string }) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
 
@@ -121,12 +126,116 @@ function SidebarContent({ activeTab }: { activeTab: SidebarTab }) {
   }
 
   return (
-    <PlaceholderPanel>
-      <button className="touch-target rounded-2xl bg-club-acid px-5 py-3 text-sm font-black text-club-black" type="button">
-        {t.createActivationCode}
-      </button>
-    </PlaceholderPanel>
+    <HandyDevicePanel sessionId={sessionId} />
   );
+}
+
+function HandyDevicePanel({ sessionId }: { sessionId: string }) {
+  const language = useAppStore((state) => state.language);
+  const t = getDictionary(language);
+  const loadHandyState = useHandyStore((state) => state.loadHandyState);
+  const createActivationCode = useHandyStore((state) => state.createActivationCode);
+  const kickDevice = useHandyStore((state) => state.kickDevice);
+  const codes = useHandyStore((state) => state.activationCodesBySession[sessionId] ?? []);
+  const devices = useHandyStore((state) => state.devicesBySession[sessionId] ?? []);
+  const [latestCode, setLatestCode] = useState("");
+  const [kickTarget, setKickTarget] = useState<StaffDevice | null>(null);
+  const latestStoredCode = codes.length > 0 ? codes[codes.length - 1] : "";
+
+  useEffect(() => {
+    loadHandyState();
+  }, [loadHandyState]);
+
+  const activeDevices = devices.filter((device) => device.status === "active");
+
+  return (
+    <section className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <Button
+        onClick={() => {
+          const code = createActivationCode(sessionId);
+          setLatestCode(code);
+        }}
+      >
+        {t.createActivationCode}
+      </Button>
+
+      {latestCode || latestStoredCode ? (
+        <div className="rounded-2xl bg-white p-4 text-center">
+          <p className="text-xs font-black uppercase text-slate-500">{t.currentActivationCode}</p>
+          <p className="mt-1 text-3xl font-black tracking-[0.18em]">
+            {latestCode || latestStoredCode}
+          </p>
+        </div>
+      ) : null}
+
+      <div>
+        <h3 className="mb-2 text-sm font-black">{t.connectedDevices}</h3>
+        {activeDevices.length === 0 ? (
+          <p className="rounded-xl bg-white p-3 text-sm font-bold text-slate-500">
+            {t.noConnectedDevices}
+          </p>
+        ) : (
+          <div className="grid gap-2">
+            {activeDevices.map((device) => (
+              <div className="rounded-xl bg-white p-3" key={device.id}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-black">{device.staffName}</p>
+                    <p className="text-xs font-bold text-slate-500">
+                      {t.connectedAt}: {formatDateTime(device.connectedAt)}
+                    </p>
+                    <p className="text-xs font-bold text-club-green">
+                      {t.status}: {t.activeStatus}
+                    </p>
+                  </div>
+                  <Button
+                    className="min-h-0 px-3 py-2"
+                    onClick={() => setKickTarget(device)}
+                    variant="danger"
+                  >
+                    {t.kickDevice}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Modal
+        onClose={() => setKickTarget(null)}
+        open={Boolean(kickTarget)}
+        title={t.removeDeviceTitle}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm font-bold text-slate-600">{t.removeDevicePrompt}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={() => setKickTarget(null)} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                if (kickTarget) kickDevice(sessionId, kickTarget.id);
+                setKickTarget(null);
+              }}
+              variant="danger"
+            >
+              {t.kickDevice}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </section>
+  );
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function PlaceholderPanel({

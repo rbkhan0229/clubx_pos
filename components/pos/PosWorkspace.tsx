@@ -159,7 +159,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
           sessionId={sessionId}
         />
       </section>
-      <RightSidebar />
+      <RightSidebar sessionId={sessionId} />
 
       <TableEditActionBar
         disabled={tableEditMode === "number" && hasDuplicateNumbers}
