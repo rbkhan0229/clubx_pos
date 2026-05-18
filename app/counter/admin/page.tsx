@@ -50,34 +50,25 @@ function describeError(err: unknown): LoadError {
   if (err instanceof ApiError) {
     if (err.status === 401 || err.status === 403) {
       return {
-        title: "Admin token is invalid or expired.",
-        message: "Go to Settings and paste a valid backend admin token.",
+        title: "관리자 토큰이 유효하지 않거나 만료되었습니다.",
+        message: "설정 화면에서 관리자 계정으로 다시 로그인하거나 유효한 토큰을 저장하세요.",
       };
     }
     if (err.status === 0) {
       return {
-        title: "Cannot reach ClubX backend.",
-        message: "Check CORS and NEXT_PUBLIC_CLUBX_API_BASE.",
+        title: "ClubX 백엔드에 연결할 수 없습니다.",
+        message: "CORS 설정과 NEXT_PUBLIC_CLUBX_API_BASE 값을 확인하세요.",
       };
     }
     return {
-      title: `Request failed (${err.status}).`,
+      title: `요청에 실패했습니다. (${err.status})`,
       message: err.message,
     };
   }
   return {
-    title: "Request failed.",
-    message: err instanceof Error ? err.message : "Unexpected error.",
+    title: "요청에 실패했습니다.",
+    message: err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.",
   };
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
 }
 
 function timeRange(reservation: AdminReservation): string {
@@ -88,8 +79,19 @@ function preferredTime(entry: AdminWaitlistEntry): string {
   if (entry.preferred_start_label && entry.preferred_end_label) {
     return `${entry.preferred_start_label} – ${entry.preferred_end_label}`;
   }
-  return "No preference";
+  return "희망 시간 없음";
 }
+
+const STATUS_LABELS: Record<string, string> = {
+  submitted: "예약 접수",
+  checked_in: "입장 완료",
+  cancelled: "취소됨",
+  waiting: "대기 중",
+  called: "호출됨",
+  seated: "착석",
+  no_show: "노쇼",
+  left: "퇴장",
+};
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -102,9 +104,9 @@ function StatusPill({ status }: { status: string }) {
           : "bg-slate-200 text-slate-600";
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black uppercase tracking-wide ${tone}`}
+      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black tracking-wide ${tone}`}
     >
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
@@ -274,8 +276,8 @@ export default function CounterAdminPage() {
       setWaitlist(null);
       setOverview(null);
       setAdminError({
-        title: "Admin token is missing.",
-        message: "Go to Settings and paste an admin token.",
+        title: "관리자 토큰이 없습니다.",
+        message: "설정 화면에서 관리자 계정으로 로그인하거나 관리자 토큰을 저장하세요.",
       });
       return;
     }
@@ -305,7 +307,7 @@ export default function CounterAdminPage() {
   }, []);
 
   const refresh = useCallback(async () => {
-    setApiBase(getApiBase() || "(not configured)");
+    setApiBase(getApiBase() || "설정되지 않음");
     setHasToken(Boolean(getAdminToken()));
     await Promise.all([loadConnection(), loadAdminData()]);
     setLastRefreshed(new Date().toLocaleTimeString());
@@ -324,17 +326,17 @@ export default function CounterAdminPage() {
             onClick={() => router.push("/counter/dashboard")}
             variant="secondary"
           >
-            POS dashboard
+            POS 대시보드
           </Button>
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
-              ClubX POS · Operator
+              ClubX POS · 운영
             </p>
             <h1 className="text-2xl font-black sm:text-4xl">
-              Pub Admin Dashboard
+              펍 운영 대시보드
             </h1>
             <p className="mt-1 text-sm font-semibold text-slate-600">
-              Public reservations and walk-in queue operation
+              공개 예약과 현장 대기열 운영 상태를 한 화면에서 확인합니다
             </p>
           </div>
         </div>
@@ -344,49 +346,49 @@ export default function CounterAdminPage() {
           variant="secondary"
           disabled={connectionLoading || adminLoading}
         >
-          {connectionLoading || adminLoading ? "Refreshing…" : "Refresh"}
+          {connectionLoading || adminLoading ? "새로고침 중..." : "새로고침"}
         </Button>
       </header>
 
       <section className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatusCard
           icon={<LinkIcon size={20} />}
-          label="API Base"
-          value={apiBase || "(not configured)"}
-          helper={config?.service_date ? `Service date ${config.service_date}` : undefined}
+          label="API 주소"
+          value={apiBase || "설정되지 않음"}
+          helper={config?.service_date ? `운영일 ${config.service_date}` : undefined}
           tone={apiBase ? "default" : "danger"}
         />
         <StatusCard
           icon={hasToken ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
-          label="Admin Token"
-          value={hasToken ? "Saved" : "Missing"}
-          helper="Stored in localStorage: clubx_admin_token"
+          label="관리자 토큰"
+          value={hasToken ? "저장됨" : "없음"}
+          helper="브라우저 저장소 키: clubx_admin_token"
           tone={hasToken ? "good" : "warn"}
         />
         <StatusCard
           icon={<DatabaseZap size={20} />}
-          label="Backend Connection"
+          label="백엔드 연결"
           value={
             connectionLoading
-              ? "Checking…"
+              ? "확인 중..."
               : connection === "ok"
-                ? "OK"
+                ? "정상"
                 : connection === "failed"
-                  ? "Failed"
-                  : "Not checked"
+                  ? "실패"
+                  : "미확인"
           }
           helper={
             config
-              ? `${config.slot_interval_minutes}min slots · max ${config.max_booking_minutes}min`
+              ? `${config.slot_interval_minutes}분 단위 · 최대 ${config.max_booking_minutes}분`
               : undefined
           }
           tone={connection === "ok" ? "good" : connection === "failed" ? "danger" : "default"}
         />
         <StatusCard
           icon={<Clock3 size={20} />}
-          label="Last Refreshed"
+          label="마지막 새로고침"
           value={lastRefreshed ?? "—"}
-          helper="Manual refresh keeps operators in control"
+          helper="운영자가 필요할 때 직접 최신 상태를 불러옵니다"
         />
       </section>
 
@@ -395,11 +397,11 @@ export default function CounterAdminPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-black text-amber-900">
-                Admin token is missing. Go to Settings and paste an admin token.
+                관리자 토큰이 없습니다. 설정 화면에서 관리자 계정으로 로그인하거나 토큰을 저장하세요.
               </p>
               <p className="mt-1 text-sm font-semibold text-amber-800">
-                Backend connectivity can be checked anonymously, but reservation
-                and waitlist data require an admin bearer token.
+                백엔드 연결 상태는 익명으로 확인할 수 있지만, 예약과 대기열 데이터는
+                관리자 bearer 토큰이 있어야 불러올 수 있습니다.
               </p>
             </div>
             <Button
@@ -407,7 +409,7 @@ export default function CounterAdminPage() {
               onClick={() => router.push("/counter/settings")}
               variant="secondary"
             >
-              Open Settings
+              설정 열기
             </Button>
           </div>
         </section>
@@ -418,31 +420,31 @@ export default function CounterAdminPage() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
-                Reservations
+                예약
               </p>
-              <h2 className="text-xl font-black">Public reservation summary</h2>
+              <h2 className="text-xl font-black">공개 예약 요약</h2>
             </div>
             {adminLoading ? (
               <span className="text-xs font-black uppercase text-slate-500">
-                Loading…
+                불러오는 중...
               </span>
             ) : null}
           </div>
           <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Total Reservations" value={reservationSummary.total} />
+            <MetricCard label="전체 예약" value={reservationSummary.total} />
             <MetricCard
-              label="Active Reservations"
+              label="유효 예약"
               value={reservationSummary.submitted}
               tone="good"
             />
             <MetricCard
-              label="Cancelled"
+              label="취소"
               value={reservationSummary.cancelled}
               tone={reservationSummary.cancelled ? "warn" : "default"}
             />
-            <MetricCard label="Total Party Size" value={reservationSummary.partySize} />
+            <MetricCard label="총 인원" value={reservationSummary.partySize} />
             <MetricCard
-              label="Reserved Tables"
+              label="예약 테이블"
               value={reservationSummary.tables}
               tone="good"
             />
@@ -453,33 +455,33 @@ export default function CounterAdminPage() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
-                Walk-in
+                현장 대기
               </p>
-              <h2 className="text-xl font-black">10-table capacity status</h2>
+              <h2 className="text-xl font-black">현장 10테이블 수용 현황</h2>
             </div>
             {adminLoading ? (
               <span className="text-xs font-black uppercase text-slate-500">
-                Loading…
+                불러오는 중...
               </span>
             ) : null}
           </div>
           <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Walk-in Table Quota" value={overview?.walkin_table_quota ?? "—"} />
+            <MetricCard label="현장 테이블 한도" value={overview?.walkin_table_quota ?? "—"} />
             <MetricCard
-              label="Occupied Tables"
+              label="사용 중 테이블"
               value={overview?.occupied_tables ?? "—"}
               tone="warn"
             />
             <MetricCard
-              label="Available Tables"
+              label="가용 테이블"
               value={overview?.available_tables ?? "—"}
               tone="good"
             />
-            <MetricCard label="Waiting Count" value={overview?.waiting_count ?? "—"} />
-            <MetricCard label="Called Count" value={overview?.called_count ?? "—"} />
-            <MetricCard label="Seated Count" value={overview?.seated_count ?? "—"} />
+            <MetricCard label="대기 수" value={overview?.waiting_count ?? "—"} />
+            <MetricCard label="호출 수" value={overview?.called_count ?? "—"} />
+            <MetricCard label="착석 수" value={overview?.seated_count ?? "—"} />
             <MetricCard
-              label="Current Called #"
+              label="현재 호출 번호"
               value={overview?.current_called_number ?? "—"}
             />
           </dl>
@@ -496,13 +498,13 @@ export default function CounterAdminPage() {
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Recent reservations</h2>
+            <h2 className="text-lg font-black">최근 예약</h2>
             <Button
               icon={<CalendarCheck2 size={16} />}
               onClick={() => router.push("/counter/reservations")}
               variant="ghost"
             >
-              View all
+              전체 보기
             </Button>
           </div>
           {recentReservations.length ? (
@@ -521,28 +523,28 @@ export default function CounterAdminPage() {
                   <div className="mt-2 grid gap-1 text-sm font-semibold text-slate-600 sm:grid-cols-4">
                     <span>{timeRange(reservation)}</span>
                     <span>{reservation.contact_name}</span>
-                    <span>Party {reservation.total_party_size}</span>
-                    <span>Tables {reservation.table_count}</span>
+                    <span>인원 {reservation.total_party_size}</span>
+                    <span>테이블 {reservation.table_count}</span>
                   </div>
                 </article>
               ))}
             </div>
           ) : (
             <EmptyState>
-              {adminLoading ? "Loading reservations…" : "No reservations loaded."}
+              {adminLoading ? "예약을 불러오는 중..." : "불러온 예약이 없습니다."}
             </EmptyState>
           )}
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-black">Recent waitlist entries</h2>
+            <h2 className="text-lg font-black">최근 현장 대기</h2>
             <Button
               icon={<Users size={16} />}
               onClick={() => router.push("/counter/waitlist")}
               variant="ghost"
             >
-              View all
+              전체 보기
             </Button>
           </div>
           {recentWaitlist.length ? (
@@ -563,50 +565,50 @@ export default function CounterAdminPage() {
                   <div className="mt-2 grid gap-1 text-sm font-semibold text-slate-600 sm:grid-cols-4">
                     <span>{entry.name}</span>
                     <span>{preferredTime(entry)}</span>
-                    <span>Party {entry.party_size}</span>
-                    <span>Tables {entry.required_tables}</span>
+                    <span>인원 {entry.party_size}</span>
+                    <span>테이블 {entry.required_tables}</span>
                   </div>
                 </article>
               ))}
             </div>
           ) : (
             <EmptyState>
-              {adminLoading ? "Loading waitlist…" : "No waitlist entries loaded."}
+              {adminLoading ? "대기열을 불러오는 중..." : "불러온 대기 항목이 없습니다."}
             </EmptyState>
           )}
         </div>
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-lg font-black">Quick actions</h2>
+        <h2 className="mb-3 text-lg font-black">빠른 이동</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Button
             icon={<CalendarCheck2 size={18} />}
             onClick={() => router.push("/counter/reservations")}
             variant="secondary"
           >
-            Public Reservations
+            공개 예약
           </Button>
           <Button
             icon={<Users size={18} />}
             onClick={() => router.push("/counter/waitlist")}
             variant="secondary"
           >
-            Walk-in Waitlist
+            현장 대기
           </Button>
           <Button
             icon={<KeyRound size={18} />}
             onClick={() => router.push("/counter/settings")}
             variant="secondary"
           >
-            Settings
+            설정
           </Button>
           <Button
             icon={<RefreshCw size={18} />}
             onClick={refresh}
             disabled={connectionLoading || adminLoading}
           >
-            Refresh
+            새로고침
           </Button>
         </div>
       </section>

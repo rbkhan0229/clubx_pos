@@ -93,28 +93,28 @@ export function DashboardClient() {
             onClick={() => router.push("/counter/admin")}
             variant="secondary"
           >
-            Admin Dashboard
+            운영 대시보드
           </Button>
           <Button
             icon={<CalendarCheck2 size={18} />}
             onClick={() => router.push("/counter/reservations")}
             variant="secondary"
           >
-            Public Reservations
+            공개 예약
           </Button>
           <Button
             icon={<Users size={18} />}
             onClick={() => router.push("/counter/waitlist")}
             variant="secondary"
           >
-            Walk-in Waitlist
+            현장 대기
           </Button>
           <Button
             icon={<Settings size={18} />}
             onClick={() => router.push("/counter/settings")}
             variant="secondary"
           >
-            Settings
+            설정
           </Button>
           <Button
             icon={<LogOut size={18} />}

@@ -32,13 +32,22 @@ const STATUS_BADGE: Record<string, string> = {
   left: "bg-slate-200 text-slate-600",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  waiting: "대기 중",
+  called: "호출됨",
+  seated: "착석",
+  no_show: "노쇼",
+  cancelled: "취소됨",
+  left: "퇴장",
+};
+
 function StatusBadge({ status }: { status: string }) {
   const cls = STATUS_BADGE[status] ?? "bg-slate-200 text-slate-700";
   return (
     <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black uppercase tracking-wide ${cls}`}
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black tracking-wide ${cls}`}
     >
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
@@ -65,43 +74,43 @@ function OverviewPanel({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
-            Walk-in capacity
+            현장 수용 현황
           </p>
-          <h2 className="text-xl font-black sm:text-2xl">10-table quota</h2>
+          <h2 className="text-xl font-black sm:text-2xl">10테이블 한도</h2>
         </div>
         <Button
           icon={<PlayCircle size={18} />}
           onClick={onCallNext}
           disabled={callNextBusy || !overview || overview.available_tables <= 0}
         >
-          {callNextBusy ? "Calling…" : "Call next"}
+          {callNextBusy ? "호출 중..." : "다음 팀 호출"}
         </Button>
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat
-          label="Quota"
+          label="한도"
           value={overview ? overview.walkin_table_quota : "—"}
         />
         <Stat
-          label="Occupied"
+          label="사용 중"
           value={overview ? overview.occupied_tables : "—"}
           tone="warn"
         />
         <Stat
-          label="Available"
+          label="가용"
           value={overview ? overview.available_tables : "—"}
           tone="good"
         />
         <Stat
-          label="Current called #"
+          label="현재 호출 번호"
           value={overview ? overview.current_called_number : "—"}
         />
         <Stat
-          label="Waiting"
+          label="대기"
           value={overview ? overview.waiting_count : "—"}
         />
-        <Stat label="Called" value={overview ? overview.called_count : "—"} />
-        <Stat label="Seated" value={overview ? overview.seated_count : "—"} />
+        <Stat label="호출" value={overview ? overview.called_count : "—"} />
+        <Stat label="착석" value={overview ? overview.seated_count : "—"} />
       </dl>
     </section>
   );
@@ -157,7 +166,7 @@ function WaitlistRow({
           <p className="mt-1 text-sm font-semibold text-slate-600">
             {entry.preferred_start_label && entry.preferred_end_label
               ? `${entry.preferred_start_label} – ${entry.preferred_end_label}`
-              : "No time preference"}
+              : "희망 시간 없음"}
           </p>
         </div>
         <div className="text-right text-xs font-semibold text-slate-500">
@@ -167,21 +176,21 @@ function WaitlistRow({
 
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Name</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">이름</dt>
           <dd className="font-black">{entry.name}</dd>
           <dd className="text-xs text-slate-600">{displayPhone(entry.phone_masked)}</dd>
         </div>
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Party</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">인원</dt>
           <dd className="font-black">{entry.party_size}</dd>
         </div>
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Tables</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">테이블</dt>
           <dd className="font-black">{entry.required_tables}</dd>
         </div>
         <div>
           <dt className="text-xs font-bold uppercase text-slate-500">
-            Called / Seated
+            호출 / 착석
           </dt>
           <dd className="font-black text-xs">
             {entry.called_at ? formatDate(entry.called_at) : "—"}
@@ -199,7 +208,7 @@ function WaitlistRow({
             onClick={() => onAction("call", entry)}
             disabled={busy}
           >
-            Call
+            호출
           </Button>
         )}
         {entry.status === "called" && (
@@ -209,7 +218,7 @@ function WaitlistRow({
               onClick={() => onAction("seat", entry)}
               disabled={busy}
             >
-              Seat
+              착석 처리
             </Button>
             <Button
               icon={<PhoneOff size={16} />}
@@ -217,7 +226,7 @@ function WaitlistRow({
               onClick={() => onAction("no_show", entry)}
               disabled={busy}
             >
-              No-show
+              노쇼
             </Button>
             <Button
               icon={<XCircle size={16} />}
@@ -225,7 +234,7 @@ function WaitlistRow({
               onClick={() => onAction("cancel", entry)}
               disabled={busy}
             >
-              Cancel
+              취소
             </Button>
           </>
         )}
@@ -236,7 +245,7 @@ function WaitlistRow({
             onClick={() => onAction("leave", entry)}
             disabled={busy}
           >
-            Mark left
+            퇴장 처리
           </Button>
         )}
       </div>
@@ -255,11 +264,11 @@ const ACTION_PATH: Record<WaitlistAction, string> = {
 };
 
 const ACTION_CONFIRM: Record<WaitlistAction, string> = {
-  call: "Call this party now?",
-  seat: "Mark this party as seated?",
-  no_show: "Mark this party as no-show?",
-  cancel: "Cancel this waitlist entry?",
-  leave: "Mark this party as left (frees their tables)?",
+  call: "이 팀을 지금 호출할까요?",
+  seat: "이 팀을 착석 처리할까요?",
+  no_show: "이 팀을 노쇼 처리할까요?",
+  cancel: "이 대기 항목을 취소할까요?",
+  leave: "이 팀을 퇴장 처리하고 테이블을 비울까요?",
 };
 
 export default function CounterWaitlistPage() {
@@ -287,7 +296,7 @@ export default function CounterWaitlistPage() {
       setList(ls);
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to load waitlist.";
+        err instanceof ApiError ? err.message : "대기열을 불러오지 못했습니다.";
       setError(message);
     } finally {
       setLoading(false);
@@ -308,7 +317,7 @@ export default function CounterWaitlistPage() {
       await load();
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Action failed.";
+        err instanceof ApiError ? err.message : "처리에 실패했습니다.";
       alert(message);
     } finally {
       setBusyId(null);
@@ -323,12 +332,12 @@ export default function CounterWaitlistPage() {
         {},
       );
       if (res.called.length === 0) {
-        alert("No waiting entries that fit available tables.");
+        alert("현재 가용 테이블에 맞는 대기 팀이 없습니다.");
       }
       await load();
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Call-next failed.";
+        err instanceof ApiError ? err.message : "다음 팀 호출에 실패했습니다.";
       alert(message);
     } finally {
       setCallNextBusy(false);
@@ -344,13 +353,13 @@ export default function CounterWaitlistPage() {
             onClick={() => router.push("/counter/dashboard")}
             variant="secondary"
           >
-            Dashboard
+            대시보드
           </Button>
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
-              ClubX POS · Walk-in
+              ClubX POS · 현장 대기
             </p>
-            <h1 className="text-2xl font-black sm:text-3xl">Waitlist</h1>
+            <h1 className="text-2xl font-black sm:text-3xl">현장 대기 관리</h1>
           </div>
         </div>
         <Button
@@ -359,7 +368,7 @@ export default function CounterWaitlistPage() {
           variant="secondary"
           disabled={loading}
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? "새로고침 중..." : "새로고침"}
         </Button>
       </header>
 
@@ -377,7 +386,7 @@ export default function CounterWaitlistPage() {
 
       {list && list.items.length === 0 && !loading ? (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm font-semibold text-slate-500">
-          No waitlist entries yet.
+          아직 현장 대기 항목이 없습니다.
         </div>
       ) : null}
 

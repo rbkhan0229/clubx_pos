@@ -19,13 +19,19 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: "bg-slate-200 text-slate-600",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  submitted: "예약 접수",
+  checked_in: "입장 완료",
+  cancelled: "취소됨",
+};
+
 function StatusBadge({ status }: { status: string }) {
   const cls = STATUS_BADGE[status] ?? "bg-slate-200 text-slate-700";
   return (
     <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black uppercase tracking-wide ${cls}`}
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black tracking-wide ${cls}`}
     >
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
@@ -70,23 +76,23 @@ function ReservationRow({
 
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Contact</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">예약자</dt>
           <dd className="font-black">{reservation.contact_name}</dd>
           <dd className="text-xs text-slate-600">
             {displayPhone(reservation.contact_phone_masked) || "—"}
           </dd>
         </div>
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Party</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">인원</dt>
           <dd className="font-black">{reservation.total_party_size}</dd>
         </div>
         <div>
-          <dt className="text-xs font-bold uppercase text-slate-500">Tables</dt>
+          <dt className="text-xs font-bold uppercase text-slate-500">테이블</dt>
           <dd className="font-black">{reservation.table_count}</dd>
         </div>
         <div>
           <dt className="text-xs font-bold uppercase text-slate-500">
-            ClubX / Non-ClubX
+            ClubX / 외부
           </dt>
           <dd className="font-black">
             {reservation.clubx_count} / {reservation.non_clubx_count}
@@ -97,7 +103,7 @@ function ReservationRow({
       {reservation.guests.length > 0 ? (
         <details className="mt-3">
           <summary className="cursor-pointer text-xs font-black uppercase tracking-wide text-slate-500">
-            Guests ({reservation.guests.length})
+            동반자 ({reservation.guests.length})
           </summary>
           <ul className="mt-2 grid gap-1 text-sm">
             {reservation.guests.map((g, idx) => (
@@ -126,7 +132,7 @@ function ReservationRow({
           disabled={!canCancel || busy}
           onClick={() => onCancel(reservation.id)}
         >
-          Cancel reservation
+          예약 취소
         </Button>
       </div>
     </article>
@@ -159,7 +165,7 @@ export default function CounterReservationsPage() {
         setData(res);
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to load reservations.";
+          err instanceof ApiError ? err.message : "예약 목록을 불러오지 못했습니다.";
         setError(message);
       } finally {
         setLoading(false);
@@ -176,7 +182,7 @@ export default function CounterReservationsPage() {
   async function handleCancel(id: string) {
     if (
       !window.confirm(
-        "Cancel this reservation and release its advance tables?",
+        "이 예약을 취소하고 선예약 테이블 재고를 복구할까요?",
       )
     )
       return;
@@ -188,7 +194,7 @@ export default function CounterReservationsPage() {
       await load();
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Failed to cancel.";
+        err instanceof ApiError ? err.message : "예약 취소에 실패했습니다.";
       alert(message);
     } finally {
       setBusyId(null);
@@ -204,14 +210,14 @@ export default function CounterReservationsPage() {
             onClick={() => router.push("/counter/dashboard")}
             variant="secondary"
           >
-            Dashboard
+            대시보드
           </Button>
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-club-lime">
               ClubX POS · Pub
             </p>
             <h1 className="text-2xl font-black sm:text-3xl">
-              Public Reservations
+              공개 예약 관리
             </h1>
           </div>
         </div>
@@ -221,7 +227,7 @@ export default function CounterReservationsPage() {
           variant="secondary"
           disabled={loading}
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? "새로고침 중..." : "새로고침"}
         </Button>
       </header>
 
@@ -234,8 +240,8 @@ export default function CounterReservationsPage() {
       <section className="mb-4 flex flex-wrap items-end gap-3">
         <div className="min-w-[200px] flex-1">
           <Input
-            label="Search"
-            placeholder="Reservation code or contact name"
+            label="검색"
+            placeholder="예약 코드 또는 예약자명"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -245,7 +251,7 @@ export default function CounterReservationsPage() {
         </div>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-black uppercase tracking-wide text-slate-500">
-            Status
+            상태
           </span>
           <select
             value={statusFilter}
@@ -256,20 +262,20 @@ export default function CounterReservationsPage() {
             }}
             className="h-11 rounded-xl border-2 border-slate-200 bg-white px-3 text-sm font-bold text-club-ink"
           >
-            <option value="">All</option>
-            <option value="submitted">Submitted</option>
-            <option value="checked_in">Checked in</option>
-            <option value="cancelled">Cancelled</option>
+            <option value="">전체</option>
+            <option value="submitted">예약 접수</option>
+            <option value="checked_in">입장 완료</option>
+            <option value="cancelled">취소됨</option>
           </select>
         </label>
         <Button variant="secondary" onClick={() => load()} disabled={loading}>
-          Apply
+          적용
         </Button>
       </section>
 
       {data && data.items.length === 0 && !loading ? (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm font-semibold text-slate-500">
-          No reservations yet.
+          아직 공개 예약이 없습니다.
         </div>
       ) : null}
 
