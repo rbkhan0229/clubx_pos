@@ -29,6 +29,7 @@ import type {
   AdminWaitlistListResponse,
   AdminWaitlistOverview,
 } from "@/lib/api/types";
+import { formatKstDateTime } from "@/lib/utils/datetime";
 
 type PublicConfigResponse = {
   event_id: string | null;
@@ -242,9 +243,54 @@ export default function CounterAdminPage() {
 
   const recentWaitlist = useMemo(() => {
     return [...(waitlist?.items ?? [])]
-      .sort((a, b) => a.queue_number - b.queue_number)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, 5);
   }, [waitlist]);
+
+  const timeGroupSummaries = useMemo(() => {
+    const items = reservations?.items ?? [];
+    const map = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        startMinute: number;
+        endMinute: number;
+        submitted: number;
+        cancelled: number;
+        party: number;
+        tables: number;
+      }
+    >();
+    for (const r of items) {
+      const key = `${r.start_minute}-${r.end_minute}`;
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key,
+          label: `${r.start_label} - ${r.end_label}`,
+          startMinute: r.start_minute,
+          endMinute: r.end_minute,
+          submitted: 0,
+          cancelled: 0,
+          party: 0,
+          tables: 0,
+        };
+        map.set(key, g);
+      }
+      if (r.status === "cancelled") {
+        g.cancelled += 1;
+      } else {
+        g.submitted += 1;
+        g.party += r.total_party_size;
+        g.tables += r.table_count;
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) =>
+        a.startMinute - b.startMinute || a.endMinute - b.endMinute,
+    );
+  }, [reservations]);
 
   const loadConnection = useCallback(async () => {
     setConnectionLoading(true);
@@ -455,6 +501,47 @@ export default function CounterAdminPage() {
         </section>
       ) : null}
 
+      <section className="mb-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="text-lg font-black">시간대별 예약 현황</h2>
+          <Button
+            icon={<CalendarCheck2 size={16} />}
+            onClick={() => router.push("/counter/reservations")}
+            variant="ghost"
+          >
+            전체 보기
+          </Button>
+        </div>
+        {timeGroupSummaries.length === 0 ? (
+          <EmptyState>
+            {adminLoading
+              ? "예약을 불러오는 중..."
+              : "불러온 예약이 없습니다."}
+          </EmptyState>
+        ) : (
+          <div className="grid gap-2">
+            {timeGroupSummaries.map((g) => (
+              <div
+                key={g.key}
+                className="flex flex-wrap items-baseline justify-between gap-2 rounded-2xl bg-slate-50 px-4 py-3"
+              >
+                <span className="text-base font-black text-club-ink">
+                  {g.label}
+                </span>
+                <span className="text-sm font-bold text-slate-700">
+                  예약 {g.submitted}팀 · {g.party}명 · {g.tables}테이블
+                  {g.cancelled > 0 ? (
+                    <span className="ml-2 text-xs font-bold text-slate-400">
+                      (취소 {g.cancelled})
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -485,6 +572,9 @@ export default function CounterAdminPage() {
                     <span>{reservation.contact_name}</span>
                     <span>인원 {reservation.total_party_size}</span>
                     <span>테이블 {reservation.table_count}</span>
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-slate-500">
+                    신청 시각 {formatKstDateTime(reservation.created_at)}
                   </div>
                 </article>
               ))}
@@ -527,6 +617,9 @@ export default function CounterAdminPage() {
                     <span>{preferredTime(entry)}</span>
                     <span>인원 {entry.party_size}</span>
                     <span>테이블 {entry.required_tables}</span>
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-slate-500">
+                    신청 시각 {formatKstDateTime(entry.created_at)}
                   </div>
                 </article>
               ))}
