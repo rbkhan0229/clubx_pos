@@ -60,6 +60,7 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
   const loadOrders = useOrderStore((state) => state.loadOrders);
   const loadVisits = useVisitStore((state) => state.loadVisits);
   const completeVisitsForTable = useVisitStore((state) => state.completeVisitsForTable);
+  const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
   const [mode, setMode] = useState<HandyMode>({ type: "tables" });
   const [cleaningTable, setCleaningTable] = useState<Table | null>(null);
   const [message, setMessage] = useState("");
@@ -168,30 +169,39 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
                 </div>
               );
             })}
-            {tables.map((table) => (
-              <button
-                className={cn(
-                  "absolute grid place-items-center rounded-2xl border-2 p-3 text-center shadow-md transition active:scale-[0.98]",
-                  tableSizeClass[table.size],
-                  statusClass[table.status],
-                  table.mergedGroupId && "border-dashed",
-                  table.status === "empty" && "cursor-not-allowed opacity-85",
-                )}
-                key={table.id}
-                onClick={() => handleTableClick(table)}
-                style={{
-                  left: table.x,
-                  top: table.y,
-                  transform: "translate(-50%, -50%)",
-                }}
-                type="button"
-              >
-                <span className="block text-2xl font-black">{table.number}</span>
-                <span className="block text-xs font-black uppercase tracking-[0.12em] opacity-80">
-                  {tableStatusLabel(table.status)}
-                </span>
-              </button>
-            ))}
+            {tables.map((table) => {
+              const activeVisit = getActiveVisitForTable(sessionId, table.id);
+              const joined = Boolean(activeVisit?.isJoined || (activeVisit?.partyCardIds.length ?? 0) >= 2);
+              return (
+                <button
+                  className={cn(
+                    "absolute grid place-items-center rounded-2xl border-2 p-3 text-center shadow-md transition active:scale-[0.98]",
+                    tableSizeClass[table.size],
+                    statusClass[table.status],
+                    table.mergedGroupId && "border-dashed",
+                    table.status === "empty" && "cursor-not-allowed opacity-85",
+                  )}
+                  key={table.id}
+                  onClick={() => handleTableClick(table)}
+                  style={{
+                    left: table.x,
+                    top: table.y,
+                    transform: "translate(-50%, -50%)",
+                  }}
+                  type="button"
+                >
+                  {joined ? (
+                    <span className="absolute -right-2 -top-2 rounded-full bg-club-red px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                      {t.join}
+                    </span>
+                  ) : null}
+                  <span className="block text-2xl font-black">{table.number}</span>
+                  <span className="block text-xs font-black uppercase tracking-[0.12em] opacity-80">
+                    {tableStatusLabel(table.status)}
+                  </span>
+                </button>
+              );
+            })}
             </div>
           </div>
         </div>

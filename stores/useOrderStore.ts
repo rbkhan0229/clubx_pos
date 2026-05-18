@@ -7,6 +7,7 @@ import type { Order, OrderItem } from "@/types";
 type NewOrderInput = {
   sessionId: string;
   visitId: string;
+  segmentId?: string;
   orderedBy?: Order["orderedBy"];
   items: Array<Pick<OrderItem, "menuItemId" | "menuName" | "unitPrice" | "quantity">>;
 };
@@ -38,9 +39,9 @@ type OrderState = {
   calculateTotals: (sessionId: string, visitId: string) => OrderTotals;
   updateOrder: (orderId: string, updates: Partial<Order>) => void;
   editOrderItems: (orderId: string, nextItems: NewOrderInput["items"]) => Order | undefined;
-  cancelOrderItems: (sessionId: string, visitId: string, payload: QuantityPayload) => Order[];
-  serviceOrderItems: (sessionId: string, visitId: string, payload: QuantityPayload) => Order[];
-  markPayableItemsPaid: (sessionId: string, visitId: string, payload: QuantityPayload) => Order[];
+  cancelOrderItems: (sessionId: string, visitId: string, payload: QuantityPayload, orderIds?: string[]) => Order[];
+  serviceOrderItems: (sessionId: string, visitId: string, payload: QuantityPayload, orderIds?: string[]) => Order[];
+  markPayableItemsPaid: (sessionId: string, visitId: string, payload: QuantityPayload, orderIds?: string[]) => Order[];
   getAffectedOrdersForMenuItem: (sessionId: string, visitId: string, menuItemId: string) => Order[];
 };
 
@@ -78,13 +79,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       },
     }));
   },
-  createOrder: ({ sessionId, visitId, orderedBy, items }) => {
+  createOrder: ({ sessionId, visitId, segmentId, orderedBy, items }) => {
     const current = get().ordersBySession[sessionId] ?? [];
     const now = new Date().toISOString();
     const order: Order = {
       id: `order-${sessionId}-${Date.now()}`,
       sessionId,
       visitId,
+      segmentId,
       orderNumber: current.length + 1,
       orderedBy: orderedBy ?? {
         type: "counter",
@@ -222,13 +224,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
     return edited;
   },
-  cancelOrderItems: (sessionId, visitId, payload) => {
+  cancelOrderItems: (sessionId, visitId, payload, orderIds) => {
     const affected: Order[] = [];
     let remaining = { ...payload };
     const currentOrders = get().ordersBySession[sessionId] ?? [];
     const nextById = new Map<string, Order>();
     const sortedVisitOrders = currentOrders
       .filter((order) => order.visitId === visitId)
+      .filter((order) => !orderIds || orderIds.includes(order.id))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
     sortedVisitOrders.forEach((order) => {
@@ -262,13 +265,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
     return affected.sort((a, b) => b.orderNumber - a.orderNumber);
   },
-  serviceOrderItems: (sessionId, visitId, payload) => {
+  serviceOrderItems: (sessionId, visitId, payload, orderIds) => {
     const affected: Order[] = [];
     let remaining = { ...payload };
     const currentOrders = get().ordersBySession[sessionId] ?? [];
     const nextById = new Map<string, Order>();
     const sortedVisitOrders = currentOrders
       .filter((order) => order.visitId === visitId)
+      .filter((order) => !orderIds || orderIds.includes(order.id))
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
     sortedVisitOrders.forEach((order) => {
@@ -304,13 +308,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
     return affected.sort((a, b) => b.orderNumber - a.orderNumber);
   },
-  markPayableItemsPaid: (sessionId, visitId, payload) => {
+  markPayableItemsPaid: (sessionId, visitId, payload, orderIds) => {
     const affected: Order[] = [];
     let remaining = { ...payload };
     const currentOrders = get().ordersBySession[sessionId] ?? [];
     const nextById = new Map<string, Order>();
     const sortedVisitOrders = currentOrders
       .filter((order) => order.visitId === visitId)
+      .filter((order) => !orderIds || orderIds.includes(order.id))
       .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
 
     sortedVisitOrders.forEach((order) => {

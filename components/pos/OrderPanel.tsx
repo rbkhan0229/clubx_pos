@@ -12,13 +12,24 @@ import { useOrderStore } from "@/stores/useOrderStore";
 import { usePaymentStore } from "@/stores/usePaymentStore";
 import { useTableStore } from "@/stores/useTableStore";
 import { useVisitStore } from "@/stores/useVisitStore";
-import type { MenuCategory, MenuItem, Order, PartyCard, Payment, Table, Visit } from "@/types";
+import type {
+  JoinRecord,
+  MenuCategory,
+  MenuItem,
+  Order,
+  OrderSegment,
+  PartyCard,
+  Payment,
+  Table,
+  Visit,
+} from "@/types";
 
 const EMPTY_ORDERS: Order[] = [];
 const EMPTY_MENU_ITEMS: MenuItem[] = [];
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_JOIN_RECORDS: JoinRecord[] = [];
 const EMPTY_LOGS: Array<{
   id: string;
   visitId: string;
@@ -35,6 +46,11 @@ type OrderPanelProps = {
   visit: Visit | null;
   partyCard: PartyCard | null;
   onClose: () => void;
+  onStartPartyCardMove?: (request: {
+    partyCard: PartyCard;
+    sourceVisit: Visit;
+    sourceLabel: string;
+  }) => void;
 };
 
 type OrderPanelMode =
@@ -46,12 +62,20 @@ type OrderPanelMode =
   | "payment"
   | "prepayment";
 
-export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPanelProps) {
+export function OrderPanel({
+  open,
+  table,
+  visit,
+  partyCard,
+  onClose,
+  onStartPartyCardMove,
+}: OrderPanelProps) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const [mode, setMode] = useState<OrderPanelMode>("summary");
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [editConfirmOrder, setEditConfirmOrder] = useState<Order | null>(null);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const loadOrders = useOrderStore((state) => state.loadOrders);
   const loadPayments = usePaymentStore((state) => state.loadPayments);
@@ -69,12 +93,14 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
     setMode("summary");
     setEditingOrder(null);
     setEditConfirmOrder(null);
+    setSelectedSegmentId(null);
   }, [open, table?.id, visit?.id]);
 
   function closePanel() {
     setMode("summary");
     setEditingOrder(null);
     setEditConfirmOrder(null);
+    setSelectedSegmentId(null);
     onClose();
   }
 
@@ -93,6 +119,11 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
           <AddOrderView
             onCancel={() => setMode("summary")}
             onComplete={() => setMode("summary")}
+            segmentId={
+              visit.isJoined || visit.partyCardIds.length >= 2
+                ? getAfterJoinSegmentId(visit.id)
+                : selectedSegmentId ?? undefined
+            }
             table={table}
             visit={visit}
           />
@@ -115,6 +146,7 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
             kind="cancel"
             onCancel={() => setMode("summary")}
             onComplete={() => setMode("summary")}
+            segmentId={selectedSegmentId ?? undefined}
             table={table}
             visit={visit}
           />
@@ -123,6 +155,7 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
             kind="service"
             onCancel={() => setMode("summary")}
             onComplete={() => setMode("summary")}
+            segmentId={selectedSegmentId ?? undefined}
             table={table}
             visit={visit}
           />
@@ -131,6 +164,7 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
             isPrepaid={mode === "prepayment"}
             onBack={() => setMode("summary")}
             onClosePanel={closePanel}
+            selectedSegmentId={selectedSegmentId ?? undefined}
             table={table}
             visit={visit}
           />
@@ -142,6 +176,16 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
             onPay={() => setMode("payment")}
             onPrepay={() => setMode("prepayment")}
             onServiceItems={() => setMode("serviceItems")}
+            selectedSegmentId={selectedSegmentId}
+            onSelectSegment={setSelectedSegmentId}
+            onStartPartyCardMove={
+              onStartPartyCardMove
+                ? (request) => {
+                    onStartPartyCardMove(request);
+                    closePanel();
+                  }
+                : undefined
+            }
             table={table}
             visit={visit}
           />
@@ -191,6 +235,9 @@ function OrderPanelHome({
   onPay,
   onPrepay,
   onServiceItems,
+  selectedSegmentId,
+  onSelectSegment,
+  onStartPartyCardMove,
   table,
   visit,
 }: {
@@ -200,6 +247,13 @@ function OrderPanelHome({
   onPay: () => void;
   onPrepay: () => void;
   onServiceItems: () => void;
+  selectedSegmentId: string | null;
+  onSelectSegment: (segmentId: string | null) => void;
+  onStartPartyCardMove?: (request: {
+    partyCard: PartyCard;
+    sourceVisit: Visit;
+    sourceLabel: string;
+  }) => void;
   table: Table;
   visit: Visit;
 }) {
@@ -226,9 +280,31 @@ function OrderPanelHome({
   const logs = useVisitStore(
     (state) => state.timeLogsByVisit[activeVisit.id] ?? EMPTY_LOGS,
   );
+  const joinRecords = useVisitStore(
+    (state) => state.joinRecordsBySession[table.sessionId] ?? EMPTY_JOIN_RECORDS,
+  );
+  const [moveWarningOpen, setMoveWarningOpen] = useState(false);
+  const orderSegments = useMemo(
+    () => buildOrderSegments(activeVisit, allOrders, joinRecords, tableLabel, language),
+    [activeVisit, allOrders, joinRecords, language, tableLabel],
+  );
+  const activeSegment = useMemo(
+    () =>
+      orderSegments.find((segment) => segment.id === selectedSegmentId) ??
+      orderSegments[orderSegments.length - 1],
+    [orderSegments, selectedSegmentId],
+  );
+
+  useEffect(() => {
+    if (!activeSegment) {
+      if (selectedSegmentId !== null) onSelectSegment(null);
+      return;
+    }
+    if (selectedSegmentId !== activeSegment.id) onSelectSegment(activeSegment.id);
+  }, [activeSegment, onSelectSegment, selectedSegmentId]);
   const orders = useMemo(
-    () => allOrders.filter((order) => order.visitId === activeVisit.id),
-    [activeVisit.id, allOrders],
+    () => getOrdersForSegment(allOrders, activeSegment, activeVisit.id),
+    [activeSegment, activeVisit.id, allOrders],
   );
   const summary = useMemo(() => {
     const rows = new Map<
@@ -288,11 +364,33 @@ function OrderPanelHome({
     () => summary.reduce((sum, row) => sum + row.discount, 0),
     [summary],
   );
-  const hasPayableItems = total > 0;
-  const hasPreviousPayment = payments.some(
-    (payment) => payment.visitId === activeVisit.id && payment.status === "paid",
+  const joinedOrderIds = useMemo(
+    () => new Set(orderSegments.flatMap((segment) => segment.orderIds)),
+    [orderSegments],
   );
-  const hasAnyOrderHistory = orders.length > 0;
+  const joinedOrders = useMemo(
+    () =>
+      allOrders.filter(
+        (order) => joinedOrderIds.has(order.id) || order.segmentId === getAfterJoinSegmentId(activeVisit.id),
+      ),
+    [activeVisit.id, allOrders, joinedOrderIds],
+  );
+  const joinedPayableTotal = useMemo(
+    () => buildPayableRows(joinedOrders).reduce((sum, row) => sum + row.amount, 0),
+    [joinedOrders],
+  );
+  const isJoinedVisit = orderSegments.length > 1;
+  const hasPayableItems = isJoinedVisit ? joinedPayableTotal > 0 : total > 0;
+  const hasPreviousPayment = payments.some(
+    (payment) =>
+      payment.status === "paid" &&
+      (isJoinedVisit
+        ? orderSegments.some((segment) => payment.segmentId === segment.id)
+        : activeSegment
+          ? payment.segmentId === activeSegment.id
+          : payment.visitId === activeVisit.id),
+  );
+  const hasAnyOrderHistory = isJoinedVisit ? joinedOrders.length > 0 : orders.length > 0;
   const canPay = hasPayableItems || (hasPreviousPayment && hasAnyOrderHistory);
   const isFinalCheckout = !hasPayableItems && hasPreviousPayment && hasAnyOrderHistory;
   const remainingMinutes = Math.max(
@@ -307,15 +405,52 @@ function OrderPanelHome({
     [activeVisit.partyCardIds, partyCards],
   );
 
+  function startPartyCardMove(partyCard: PartyCard) {
+    if (activeVisit.partyCardIds.length !== 1) {
+      setMoveWarningOpen(true);
+      return;
+    }
+    onStartPartyCardMove?.({
+      partyCard,
+      sourceVisit: activeVisit,
+      sourceLabel: tableLabel,
+    });
+  }
+
   return (
     <div className="grid gap-4">
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
           {t.orderPanel}
         </p>
-        <h2 className="text-4xl font-black">
-          {t.table} {tableLabel}
-        </h2>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h2 className="text-4xl font-black">
+            {t.table} {tableLabel}
+          </h2>
+          {orderSegments.length > 1 ? (
+            <span className="rounded-full bg-club-black px-3 py-1 text-xs font-black text-white">
+              {t.joinedTable}
+            </span>
+          ) : null}
+        </div>
+        {orderSegments.length > 1 ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {orderSegments.map((segment) => (
+              <button
+                className={`rounded-2xl px-4 py-2 text-sm font-black ${
+                  activeSegment?.id === segment.id
+                    ? "bg-club-acid text-club-black"
+                    : "bg-white text-slate-700 hover:bg-lime-50"
+                }`}
+                key={segment.id}
+                onClick={() => onSelectSegment(segment.id)}
+                type="button"
+              >
+                {segment.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -420,17 +555,40 @@ function OrderPanelHome({
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-3 text-lg font-black">{t.mappedPartyCards}</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-lg font-black">{t.mappedPartyCards}</h3>
+            {mappedPartyCards.length >= 2 || activeVisit.isJoined ? (
+              <span className="rounded-full bg-club-black px-3 py-1 text-xs font-black text-white">
+                {t.joinedTable}
+              </span>
+            ) : null}
+          </div>
           <div className="grid gap-2">
             {mappedPartyCards.map((partyCard) => (
               <div
                 className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                 key={partyCard.id}
               >
-                <p className="text-xl font-black">{partyCard.code}</p>
-                <p className="mt-1 text-sm font-bold text-slate-600">
-                  {t.partyType}: {partyCard.type === "walkIn" ? t.walkIn : partyCard.type === "reservation" ? t.reservation : t.waitingManagement}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xl font-black">{partyCard.code}</p>
+                    <p className="mt-1 text-sm font-bold text-slate-600">
+                      {t.partyType}: {partyCard.type === "walkIn" ? t.walkIn : partyCard.type === "reservation" ? t.reservation : t.waitingManagement}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600">
+                    {t.guestCount}: {partyCard.guests.length}
+                  </span>
+                </div>
+                {onStartPartyCardMove ? (
+                  <Button
+                    className="mt-3 w-full"
+                    onClick={() => startPartyCardMove(partyCard)}
+                    variant="secondary"
+                  >
+                    {t.moveJoin}
+                  </Button>
+                ) : null}
                 {partyCard.type === "reservation" ? (
                   <div className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
                     <p>
@@ -461,6 +619,18 @@ function OrderPanelHome({
               </div>
             ))}
           </div>
+          <Modal
+            onClose={() => setMoveWarningOpen(false)}
+            open={moveWarningOpen}
+            title={t.moveJoin}
+          >
+            <div className="grid gap-4">
+              <p className="text-sm font-bold text-slate-600">
+                {t.movingFromJoinedNotSupported}
+              </p>
+              <Button onClick={() => setMoveWarningOpen(false)}>{t.close}</Button>
+            </div>
+          </Modal>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -496,11 +666,13 @@ function OrderPanelHome({
 function AddOrderView({
   onCancel,
   onComplete,
+  segmentId,
   table,
   visit,
 }: {
   onCancel: () => void;
   onComplete: () => void;
+  segmentId?: string;
   table: Table;
   visit: Visit;
 }) {
@@ -544,6 +716,7 @@ function AddOrderView({
     const order = createOrder({
       sessionId: table.sessionId,
       visitId: visit.id,
+      segmentId,
       items: selectedItems.map(({ item, quantity }) => ({
         menuItemId: item.id,
         menuName: item.nameKo,
@@ -802,12 +975,14 @@ function AdjustmentView({
   kind,
   onCancel,
   onComplete,
+  segmentId,
   table,
   visit,
 }: {
   kind: "cancel" | "service";
   onCancel: () => void;
   onComplete: () => void;
+  segmentId?: string;
   table: Table;
   visit: Visit;
 }) {
@@ -816,16 +991,39 @@ function AdjustmentView({
   const allOrders = useOrderStore(
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
+  const joinRecords = useVisitStore(
+    (state) => state.joinRecordsBySession[table.sessionId] ?? EMPTY_JOIN_RECORDS,
+  );
+  const sessionTables = useTableStore(
+    (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
+  );
   const cancelOrderItems = useOrderStore((state) => state.cancelOrderItems);
   const serviceOrderItems = useOrderStore((state) => state.serviceOrderItems);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const orderSegments = useMemo(
+    () =>
+      buildOrderSegments(
+        visit,
+        allOrders,
+        joinRecords,
+        getVisitTableLabel(visit, sessionTables, table),
+        language,
+      ),
+    [allOrders, joinRecords, language, sessionTables, table, visit],
+  );
+  const activeSegment = useMemo(
+    () =>
+      orderSegments.find((segment) => segment.id === segmentId) ??
+      orderSegments[orderSegments.length - 1],
+    [orderSegments, segmentId],
+  );
   const orders = useMemo(
     () =>
-      allOrders
-        .filter((order) => order.visitId === visit.id)
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [allOrders, visit.id],
+      getOrdersForSegment(allOrders, activeSegment, visit.id).sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [activeSegment, allOrders, visit.id],
   );
   const rows = useMemo(() => buildAdjustmentRows(orders, kind), [kind, orders]);
   const selectedRows = rows
@@ -860,8 +1058,8 @@ function AdjustmentView({
     }, {});
     const affectedOrders =
       kind === "cancel"
-        ? cancelOrderItems(table.sessionId, visit.id, payload)
-        : serviceOrderItems(table.sessionId, visit.id, payload);
+        ? cancelOrderItems(table.sessionId, activeSegment?.visitId ?? visit.id, payload, activeSegment?.orderIds)
+        : serviceOrderItems(table.sessionId, activeSegment?.visitId ?? visit.id, payload, activeSegment?.orderIds);
     if (kind === "cancel") {
       await Promise.all(
         affectedOrders.map((order) => printOrderSlip(order, { tableNumber: table.number })),
@@ -958,12 +1156,14 @@ function PaymentView({
   isPrepaid,
   onBack,
   onClosePanel,
+  selectedSegmentId,
   table,
   visit,
 }: {
   isPrepaid: boolean;
   onBack: () => void;
   onClosePanel: () => void;
+  selectedSegmentId?: string;
   table: Table;
   visit: Visit;
 }) {
@@ -982,8 +1182,12 @@ function PaymentView({
     (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
   );
   const updateVisitStatus = useVisitStore((state) => state.updateVisitStatus);
+  const joinRecords = useVisitStore(
+    (state) => state.joinRecordsBySession[table.sessionId] ?? EMPTY_JOIN_RECORDS,
+  );
   const [peopleCount, setPeopleCount] = useState(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const joined = Boolean(visit.isJoined || visit.partyCardIds.length >= 2);
   const orders = useMemo(
     () => allOrders.filter((order) => order.visitId === visit.id),
     [allOrders, visit.id],
@@ -1043,6 +1247,20 @@ function PaymentView({
     updateVisitStatus(table.sessionId, visit.id, "cleaning");
     visit.tableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
     onClosePanel();
+  }
+
+  if (joined) {
+    return (
+      <JoinedPaymentView
+        isPrepaid={isPrepaid}
+        joinRecords={joinRecords}
+        onBack={onBack}
+        onClosePanel={onClosePanel}
+        selectedSegmentId={selectedSegmentId}
+        table={table}
+        visit={visit}
+      />
+    );
   }
 
   return (
@@ -1151,6 +1369,259 @@ function PaymentView({
   );
 }
 
+function JoinedPaymentView({
+  isPrepaid,
+  joinRecords,
+  onBack,
+  onClosePanel,
+  selectedSegmentId,
+  table,
+  visit,
+}: {
+  isPrepaid: boolean;
+  joinRecords: JoinRecord[];
+  onBack: () => void;
+  onClosePanel: () => void;
+  selectedSegmentId?: string;
+  table: Table;
+  visit: Visit;
+}) {
+  const language = useAppStore((state) => state.language);
+  const t = getDictionary(language);
+  const allOrders = useOrderStore(
+    (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
+  );
+  const payments = usePaymentStore(
+    (state) => state.paymentsBySession[table.sessionId] ?? EMPTY_PAYMENTS,
+  );
+  const sessionTables = useTableStore(
+    (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
+  );
+  const createPayment = usePaymentStore((state) => state.createPayment);
+  const markPayableItemsPaid = useOrderStore((state) => state.markPayableItemsPaid);
+  const updateTable = useTableStore((state) => state.updateTable);
+  const updateVisitStatus = useVisitStore((state) => state.updateVisitStatus);
+  const [peopleCount, setPeopleCount] = useState(1);
+  const [payAll, setPayAll] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const tableLabel = getVisitTableLabel(visit, sessionTables, table);
+  const segments = useMemo(
+    () => buildOrderSegments(visit, allOrders, joinRecords, tableLabel, language),
+    [allOrders, joinRecords, language, tableLabel, visit],
+  );
+  const payableSegments = useMemo(
+    () =>
+      segments
+        .map((segment) => {
+          const orders = getOrdersForSegment(allOrders, segment, visit.id);
+          const rows = buildPayableRows(orders);
+          const paymentItems = rows.filter((row) => !row.isService && row.quantity > 0);
+          return {
+            segment,
+            orders,
+            rows,
+            paymentItems,
+            totalAmount: paymentItems.reduce((sum, row) => sum + row.amount, 0),
+            discountAmount: rows.reduce((sum, row) => sum + row.discountAmount, 0),
+          };
+        })
+        .filter((entry) => entry.orders.length > 0 || entry.totalAmount > 0),
+    [allOrders, segments, visit.id],
+  );
+  const unpaidSegments = payableSegments.filter((entry) => entry.totalAmount > 0);
+  const selectedEntry =
+    unpaidSegments.find((entry) => entry.segment.id === selectedSegmentId) ??
+    unpaidSegments[0] ??
+    payableSegments[0];
+  const activeEntries = payAll && !isPrepaid ? unpaidSegments : selectedEntry ? [selectedEntry] : [];
+  const totalAmount = activeEntries.reduce((sum, entry) => sum + entry.totalAmount, 0);
+  const discountAmount = activeEntries.reduce((sum, entry) => sum + entry.discountAmount, 0);
+  const perPersonAmount = Math.floor(totalAmount / Math.max(1, peopleCount));
+  const hasPreviousPayment = payments.some((payment) =>
+    segments.some((segment) => payment.segmentId === segment.id && payment.status === "paid"),
+  );
+  const isCheckoutOnly = !isPrepaid && totalAmount === 0 && hasPreviousPayment && payableSegments.length > 0;
+  const stepIndex = selectedEntry ? Math.max(0, unpaidSegments.findIndex((entry) => entry.segment.id === selectedEntry.segment.id)) : 0;
+  const stepLabel = `${Math.min(stepIndex + 1, Math.max(1, unpaidSegments.length))}/${Math.max(1, unpaidSegments.length)}`;
+
+  function updatePeopleCount(value: string) {
+    const nextValue = Number.parseInt(value, 10);
+    setPeopleCount(Number.isFinite(nextValue) ? Math.max(1, nextValue) : 1);
+  }
+
+  function completeJoinedPayment() {
+    if (isCheckoutOnly) {
+      setConfirmOpen(false);
+      updateVisitStatus(table.sessionId, visit.id, "cleaning");
+      visit.tableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
+      onClosePanel();
+      return;
+    }
+
+    activeEntries.forEach((entry) => {
+      if (entry.totalAmount <= 0) return;
+      const allocation = entry.rows.reduce<Record<string, number>>((next, item) => {
+        next[item.menuItemId] = item.quantity;
+        return next;
+      }, {});
+      createPayment({
+        sessionId: table.sessionId,
+        visitId: entry.segment.visitId,
+        tableLabel: entry.segment.tableLabel,
+        segmentId: entry.segment.id,
+        segmentLabel: entry.segment.label,
+        items: entry.paymentItems.map((item) => ({
+          menuItemId: item.menuItemId,
+          menuName: item.menuName,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          amount: item.amount,
+        })),
+        totalAmount: entry.totalAmount,
+        discountAmount: entry.discountAmount,
+        isPrepaid,
+      });
+      markPayableItemsPaid(table.sessionId, entry.segment.visitId, allocation, entry.segment.orderIds);
+    });
+
+    setConfirmOpen(false);
+    if (isPrepaid) {
+      onBack();
+      return;
+    }
+
+    const remainingAfterPayment = unpaidSegments.filter(
+      (entry) => !activeEntries.some((paidEntry) => paidEntry.segment.id === entry.segment.id),
+    );
+    if (payAll || remainingAfterPayment.length === 0) {
+      updateVisitStatus(table.sessionId, visit.id, "cleaning");
+      visit.tableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
+      onClosePanel();
+      return;
+    }
+    setPeopleCount(1);
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="rounded-2xl bg-slate-50 p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
+          {t.table} {tableLabel}
+        </p>
+        <h3 className="text-xl font-black">
+          {isCheckoutOnly ? t.finishCheckout : isPrepaid ? t.prepayment : t.joinedPayment}
+        </h3>
+      </div>
+
+      {isCheckoutOnly ? (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-base font-black text-slate-700">{t.finalCheckoutMessage}</p>
+          <p className="text-lg font-black">{t.totalAmount}: {formatMoney(0)}</p>
+        </section>
+      ) : selectedEntry ? (
+        <section className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">
+                {payAll && !isPrepaid ? t.payAllAtOnce : `${t.paymentStep} ${stepLabel}`}
+              </p>
+              <h3 className="text-xl font-black">
+                {payAll && !isPrepaid ? t.joinedAllSegments : selectedEntry.segment.label}
+              </h3>
+              <p className="text-sm font-bold text-slate-500">
+                {payAll && !isPrepaid ? tableLabel : selectedEntry.segment.tableLabel}
+              </p>
+            </div>
+            {!isPrepaid ? (
+              <label className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-black">
+                <input
+                  checked={payAll}
+                  onChange={(event) => setPayAll(event.target.checked)}
+                  type="checkbox"
+                />
+                {t.payAllAtOnce}
+              </label>
+            ) : null}
+          </div>
+          <div className="grid gap-2">
+            {activeEntries.flatMap((entry) =>
+              entry.rows.map((row) => (
+                <div
+                  className="flex justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold"
+                  key={`${entry.segment.id}-${row.menuItemId}-${row.isService ? "service" : "paid"}`}
+                >
+                  <span>
+                    {row.isService ? `${t.servicePrefix} ${row.menuName}` : row.menuName} x {row.quantity}
+                  </span>
+                  <span>{formatMoney(row.amount)}</span>
+                </div>
+              )),
+            )}
+          </div>
+        </section>
+      ) : (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-base font-black text-slate-700">{t.noOrdersYet}</p>
+        </section>
+      )}
+
+      {!isCheckoutOnly ? (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-2 text-lg font-black sm:grid-cols-2">
+            <p>{t.totalAmount}: {formatMoney(totalAmount)}</p>
+            <p>{t.discountAmount}: {formatMoney(discountAmount)}</p>
+          </div>
+          <label className="grid gap-2 text-sm font-bold text-slate-600 sm:max-w-xs">
+            {t.paymentPeopleCount}
+            <input
+              className="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold outline-none focus:border-club-green"
+              min={1}
+              onChange={(event) => updatePeopleCount(event.target.value)}
+              type="number"
+              value={peopleCount}
+            />
+          </label>
+          {peopleCount >= 2 ? (
+            <p className="text-lg font-black">{t.perPersonAmount}: {formatMoney(perPersonAmount)}</p>
+          ) : null}
+          <p className="rounded-2xl bg-white p-4 text-center text-base font-black text-club-green">
+            {t.confirmDeposit}
+          </p>
+        </section>
+      ) : null}
+
+      <div className="sticky bottom-0 grid gap-3 bg-white pt-2 sm:grid-cols-2">
+        <Button onClick={onBack} variant="secondary">
+          {t.back}
+        </Button>
+        <Button disabled={!isCheckoutOnly && totalAmount <= 0} onClick={() => setConfirmOpen(true)}>
+          {isCheckoutOnly ? t.completeCheckout : `${isPrepaid ? t.completePrepayment : t.completePayment} (${stepLabel})`}
+        </Button>
+      </div>
+
+      <Modal
+        onClose={() => setConfirmOpen(false)}
+        open={confirmOpen}
+        title={isCheckoutOnly ? t.confirmCheckoutTitle : t.confirmPaymentTitle}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm font-bold text-slate-600">
+            {isCheckoutOnly ? t.confirmCheckoutPrompt : t.confirmPaymentPrompt}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={() => setConfirmOpen(false)} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button onClick={completeJoinedPayment}>
+              {isCheckoutOnly ? t.completeCheckout : `${isPrepaid ? t.completePrepayment : t.completePayment} (${stepLabel})`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 function buildPayableRows(orders: Order[]) {
   const rows = new Map<string, PayableRow>();
 
@@ -1191,6 +1662,104 @@ function buildPayableRows(orders: Order[]) {
     });
 
   return [...rows.values()];
+}
+
+function getAfterJoinSegmentId(visitId: string) {
+  return `${visitId}:after-join`;
+}
+
+function buildOrderSegments(
+  visit: Visit,
+  orders: Order[],
+  joinRecords: JoinRecord[],
+  tableLabel: string,
+  language: "ko" | "en",
+): OrderSegment[] {
+  const records = joinRecords
+    .filter((record) => record.targetVisitId === visit.id)
+    .sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime());
+  const visitOrders = orders.filter((order) => order.visitId === visit.id);
+  const joined = Boolean(visit.isJoined || visit.partyCardIds.length >= 2 || records.length > 0);
+
+  if (!joined) {
+    return [
+      {
+        id: `${visit.id}:all`,
+        sessionId: visit.sessionId,
+        visitId: visit.id,
+        label: language === "ko" ? `${tableLabel} 전체` : `Table ${tableLabel}`,
+        tableLabel: language === "ko" ? `테이블 ${tableLabel}` : `Table ${tableLabel}`,
+        type: "afterJoin",
+        orderIds: visitOrders.map((order) => order.id),
+        createdAt: visit.startedAt,
+      },
+    ];
+  }
+
+  const firstJoin = records[0];
+  const targetPreJoinOrderIds =
+    firstJoin?.targetPreJoinOrderIds && firstJoin.targetPreJoinOrderIds.length > 0
+      ? firstJoin.targetPreJoinOrderIds
+      : visitOrders
+          .filter((order) => !firstJoin || new Date(order.createdAt).getTime() < new Date(firstJoin.joinedAt).getTime())
+          .map((order) => order.id);
+  const sourceSegments = records
+    .filter((record) => record.sourceVisitId)
+    .map((record) => {
+      const sourceOrderIds =
+        record.sourcePreJoinOrderIds && record.sourcePreJoinOrderIds.length > 0
+          ? record.sourcePreJoinOrderIds
+          : orders.filter((order) => order.visitId === record.sourceVisitId).map((order) => order.id);
+      const sourceLabel = record.sourceTableLabel ?? "";
+      return {
+        id: `${record.sourceVisitId}:pre-join:${record.id}`,
+        sessionId: visit.sessionId,
+        visitId: record.sourceVisitId ?? visit.id,
+        label: language === "ko" ? `테이블 ${sourceLabel}` : `Table ${sourceLabel}`,
+        tableLabel: language === "ko" ? `테이블 ${sourceLabel}` : `Table ${sourceLabel}`,
+        type: "preJoin" as const,
+        sourceVisitId: record.sourceVisitId,
+        orderIds: sourceOrderIds,
+        createdAt: record.joinedAt,
+      };
+    });
+  const afterJoinId = getAfterJoinSegmentId(visit.id);
+  const preJoinSet = new Set(targetPreJoinOrderIds);
+  const afterJoinOrderIds = visitOrders
+    .filter((order) => order.segmentId === afterJoinId || !preJoinSet.has(order.id))
+    .map((order) => order.id);
+  const targetPreSegment: OrderSegment = {
+    id: `${visit.id}:pre-join`,
+    sessionId: visit.sessionId,
+    visitId: visit.id,
+    label: language === "ko" ? `테이블 ${firstJoin?.targetTableLabel ?? tableLabel}` : `Table ${firstJoin?.targetTableLabel ?? tableLabel}`,
+    tableLabel: language === "ko" ? `테이블 ${firstJoin?.targetTableLabel ?? tableLabel}` : `Table ${firstJoin?.targetTableLabel ?? tableLabel}`,
+    type: "preJoin",
+    orderIds: targetPreJoinOrderIds,
+    createdAt: firstJoin?.joinedAt ?? visit.joinedAt ?? visit.startedAt,
+  };
+  const afterJoinSegment: OrderSegment = {
+    id: afterJoinId,
+    sessionId: visit.sessionId,
+    visitId: visit.id,
+    label: language === "ko" ? `${tableLabel} 합석 후` : `${tableLabel} After Join`,
+    tableLabel: tableLabel,
+    type: "afterJoin",
+    orderIds: afterJoinOrderIds,
+    createdAt: firstJoin?.joinedAt ?? visit.joinedAt ?? visit.startedAt,
+  };
+
+  return [...sourceSegments, targetPreSegment, afterJoinSegment];
+}
+
+function getOrdersForSegment(orders: Order[], segment: OrderSegment | undefined, fallbackVisitId: string) {
+  if (!segment) return orders.filter((order) => order.visitId === fallbackVisitId);
+  const ids = new Set(segment.orderIds);
+  return orders.filter(
+    (order) =>
+      (order.visitId === segment.visitId && ids.has(order.id)) ||
+      order.segmentId === segment.id,
+  );
 }
 
 type AdjustmentRow = {

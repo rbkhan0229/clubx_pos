@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { broadcastClubxSync } from "@/lib/localSync";
-import type { PartyCard, TimeAdjustmentLog, Visit } from "@/types";
+import type { JoinRecord, PartyCard, TimeAdjustmentLog, Visit } from "@/types";
 
 type WalkInResult = {
   partyCard: PartyCard;
@@ -12,6 +12,7 @@ type WalkInResult = {
 type VisitState = {
   partyCardsBySession: Record<string, PartyCard[]>;
   visitsBySession: Record<string, Visit[]>;
+  joinRecordsBySession: Record<string, JoinRecord[]>;
   timeLogsByVisit: Record<string, TimeAdjustmentLog[]>;
   loadVisits: (sessionId: string) => void;
   createWalkInVisit: (sessionId: string, tableId: string) => WalkInResult;
@@ -23,6 +24,30 @@ type VisitState = {
   checkInAllGuests: (sessionId: string, partyCardId: string) => void;
   updateOverdueReservations: (sessionId: string) => void;
   assignPartyCardToTable: (sessionId: string, partyCardId: string, tableId: string | string[]) => Visit | undefined;
+  joinPartyCardToVisit: (
+    sessionId: string,
+    visitId: string,
+    partyCardId: string,
+    metadata?: {
+      targetTableIds: string[];
+      targetTableLabel: string;
+      targetPreJoinOrderIds: string[];
+    },
+  ) => Visit | undefined;
+  movePartyCardToVisit: (
+    sessionId: string,
+    sourceVisitId: string,
+    targetVisitId: string,
+    partyCardId: string,
+    metadata?: {
+      sourceTableIds: string[];
+      sourceTableLabel: string;
+      sourcePreJoinOrderIds: string[];
+      targetTableIds: string[];
+      targetTableLabel: string;
+      targetPreJoinOrderIds: string[];
+    },
+  ) => { sourceVisit: Visit; targetVisit: Visit } | undefined;
   adjustVisitTime: (sessionId: string, visitId: string, minutes: number) => void;
   updateVisitStatus: (sessionId: string, visitId: string, status: Visit["status"]) => void;
   completeVisitsForTable: (sessionId: string, tableId: string) => void;
@@ -30,6 +55,7 @@ type VisitState = {
 
 const partyKey = (sessionId: string) => `clubx-pos:party-cards:${sessionId}`;
 const visitKey = (sessionId: string) => `clubx-pos:visits:${sessionId}`;
+const joinKey = (sessionId: string) => `clubx-pos:join-records:${sessionId}`;
 const logKey = (sessionId: string) => `clubx-pos:time-logs:${sessionId}`;
 
 function saveVisitState(
@@ -42,6 +68,12 @@ function saveVisitState(
   window.localStorage.setItem(partyKey(sessionId), JSON.stringify(partyCards));
   window.localStorage.setItem(visitKey(sessionId), JSON.stringify(visits));
   window.localStorage.setItem(logKey(sessionId), JSON.stringify(logsByVisit));
+  broadcastClubxSync({ sessionId, store: "visits" });
+}
+
+function saveJoinRecords(sessionId: string, joinRecords: JoinRecord[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(joinKey(sessionId), JSON.stringify(joinRecords));
   broadcastClubxSync({ sessionId, store: "visits" });
 }
 
@@ -61,12 +93,14 @@ function reservationDateTime(time?: string) {
 export const useVisitStore = create<VisitState>((set, get) => ({
   partyCardsBySession: {},
   visitsBySession: {},
+  joinRecordsBySession: {},
   timeLogsByVisit: {},
   loadVisits: (sessionId) => {
     if (typeof window === "undefined") return;
 
     const rawPartyCards = window.localStorage.getItem(partyKey(sessionId));
     const rawVisits = window.localStorage.getItem(visitKey(sessionId));
+    const rawJoins = window.localStorage.getItem(joinKey(sessionId));
     const rawLogs = window.localStorage.getItem(logKey(sessionId));
     set((state) => ({
       partyCardsBySession: {
@@ -76,6 +110,10 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       visitsBySession: {
         ...state.visitsBySession,
         [sessionId]: rawVisits ? (JSON.parse(rawVisits) as Visit[]) : [],
+      },
+      joinRecordsBySession: {
+        ...state.joinRecordsBySession,
+        [sessionId]: rawJoins ? (JSON.parse(rawJoins) as JoinRecord[]) : [],
       },
       timeLogsByVisit: {
         ...state.timeLogsByVisit,
@@ -279,6 +317,171 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       },
     }));
     return visit;
+  },
+  joinPartyCardToVisit: (sessionId, visitId, partyCardId, metadata) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const currentVisits = get().visitsBySession[sessionId] ?? [];
+    const partyCard = currentPartyCards.find((card) => card.id === partyCardId);
+    const targetVisit = currentVisits.find((visit) => visit.id === visitId && visit.status === "active");
+    if (
+      !partyCard ||
+      partyCard.status === "seated" ||
+      partyCard.status === "completed" ||
+      !targetVisit ||
+      targetVisit.partyCardIds.includes(partyCardId)
+    ) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const currentJoinRecords = get().joinRecordsBySession[sessionId] ?? [];
+    const joinRecord: JoinRecord = {
+      id: `join-${sessionId}-${Date.now()}`,
+      sessionId,
+      targetVisitId: visitId,
+      targetTableIds: metadata?.targetTableIds ?? targetVisit.tableIds,
+      addedPartyCardId: partyCardId,
+      joinedAt: now,
+      targetTableLabel: metadata?.targetTableLabel ?? targetVisit.visitCode,
+      targetPreJoinOrderIds: metadata?.targetPreJoinOrderIds ?? [],
+      afterJoinOrderIds: [],
+    };
+    const nextJoinRecords = [...currentJoinRecords, joinRecord];
+    let joinedVisit: Visit | undefined;
+    const nextVisits = currentVisits.map((visit) => {
+      if (visit.id !== visitId) return visit;
+      joinedVisit = {
+        ...visit,
+        partyCardIds: [...visit.partyCardIds, partyCardId],
+        sourceType: "joined",
+        isJoined: true,
+        joinedAt: visit.joinedAt ?? now,
+      };
+      return joinedVisit;
+    });
+    const nextPartyCards = currentPartyCards.map((card) =>
+      card.id === partyCardId
+        ? { ...card, status: "seated" as const, mappedTableIds: targetVisit.tableIds }
+        : card,
+    );
+
+    saveVisitState(sessionId, nextPartyCards, nextVisits, get().timeLogsByVisit);
+    saveJoinRecords(sessionId, nextJoinRecords);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+      visitsBySession: {
+        ...state.visitsBySession,
+        [sessionId]: nextVisits,
+      },
+      joinRecordsBySession: {
+        ...state.joinRecordsBySession,
+        [sessionId]: nextJoinRecords,
+      },
+    }));
+    return joinedVisit;
+  },
+  movePartyCardToVisit: (sessionId, sourceVisitId, targetVisitId, partyCardId, metadata) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const currentVisits = get().visitsBySession[sessionId] ?? [];
+    const partyCard = currentPartyCards.find((card) => card.id === partyCardId);
+    const sourceVisit = currentVisits.find(
+      (visit) => visit.id === sourceVisitId && visit.status === "active",
+    );
+    const targetVisit = currentVisits.find(
+      (visit) => visit.id === targetVisitId && visit.status === "active",
+    );
+
+    if (
+      !partyCard ||
+      !sourceVisit ||
+      !targetVisit ||
+      sourceVisit.id === targetVisit.id ||
+      sourceVisit.partyCardIds.length !== 1 ||
+      sourceVisit.partyCardIds[0] !== partyCardId ||
+      targetVisit.partyCardIds.includes(partyCardId)
+    ) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const currentJoinRecords = get().joinRecordsBySession[sessionId] ?? [];
+    const joinRecord: JoinRecord = {
+      id: `join-${sessionId}-${Date.now()}`,
+      sessionId,
+      targetVisitId,
+      sourceVisitId,
+      targetTableIds: metadata?.targetTableIds ?? targetVisit.tableIds,
+      sourceTableIds: metadata?.sourceTableIds ?? sourceVisit.tableIds,
+      movedPartyCardId: partyCardId,
+      addedPartyCardId: partyCardId,
+      joinedAt: now,
+      targetTableLabel: metadata?.targetTableLabel ?? targetVisit.visitCode,
+      sourceTableLabel: metadata?.sourceTableLabel ?? sourceVisit.visitCode,
+      targetPreJoinOrderIds: metadata?.targetPreJoinOrderIds ?? [],
+      sourcePreJoinOrderIds: metadata?.sourcePreJoinOrderIds ?? [],
+      afterJoinOrderIds: [],
+    };
+    const nextJoinRecords = [...currentJoinRecords, joinRecord];
+    let nextSourceVisit: Visit | undefined;
+    let nextTargetVisit: Visit | undefined;
+    const nextVisits = currentVisits.map((visit) => {
+      if (visit.id === sourceVisitId) {
+        nextSourceVisit = {
+          ...visit,
+          status: "completed",
+        };
+        return nextSourceVisit;
+      }
+
+      if (visit.id === targetVisitId) {
+        nextTargetVisit = {
+          ...visit,
+          partyCardIds: [...visit.partyCardIds, partyCardId],
+          sourceType: "joined",
+          isJoined: true,
+          joinedAt: visit.joinedAt ?? now,
+        };
+        return nextTargetVisit;
+      }
+
+      return visit;
+    });
+
+    if (!nextSourceVisit || !nextTargetVisit) return undefined;
+    const movedSourceVisit = nextSourceVisit;
+    const movedTargetVisit = nextTargetVisit;
+
+    const nextPartyCards = currentPartyCards.map((card) =>
+      card.id === partyCardId
+        ? {
+            ...card,
+            status: "seated" as const,
+            mappedTableIds: movedTargetVisit.tableIds,
+          }
+        : card,
+    );
+
+    saveVisitState(sessionId, nextPartyCards, nextVisits, get().timeLogsByVisit);
+    saveJoinRecords(sessionId, nextJoinRecords);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+      visitsBySession: {
+        ...state.visitsBySession,
+        [sessionId]: nextVisits,
+      },
+      joinRecordsBySession: {
+        ...state.joinRecordsBySession,
+        [sessionId]: nextJoinRecords,
+      },
+    }));
+
+    return { sourceVisit: movedSourceVisit, targetVisit: movedTargetVisit };
   },
   adjustVisitTime: (sessionId, visitId, minutes) => {
     const visits = get().visitsBySession[sessionId] ?? [];

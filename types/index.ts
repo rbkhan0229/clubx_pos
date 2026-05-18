@@ -107,12 +107,43 @@ export type Visit = {
   sessionId: string;
   tableIds: string[];
   partyCardIds: string[];
-  sourceType: "reservation" | "waiting" | "walkIn";
+  sourceType: "reservation" | "waiting" | "walkIn" | "joined";
   sourceId?: string;
   visitCode: string;
   startedAt: string;
   expectedEndAt: string;
   status: "active" | "paid" | "cleaning" | "completed";
+  isJoined?: boolean;
+  joinedAt?: string;
+};
+
+export type JoinRecord = {
+  id: string;
+  sessionId: string;
+  targetVisitId: string;
+  sourceVisitId?: string;
+  targetTableIds: string[];
+  sourceTableIds?: string[];
+  movedPartyCardId?: string;
+  addedPartyCardId: string;
+  joinedAt: string;
+  targetTableLabel: string;
+  sourceTableLabel?: string;
+  targetPreJoinOrderIds: string[];
+  sourcePreJoinOrderIds?: string[];
+  afterJoinOrderIds: string[];
+};
+
+export type OrderSegment = {
+  id: string;
+  sessionId: string;
+  visitId: string;
+  label: string;
+  tableLabel: string;
+  type: "preJoin" | "afterJoin";
+  sourceVisitId?: string;
+  orderIds: string[];
+  createdAt: string;
 };
 
 export type TimeAdjustmentLog = {
@@ -159,6 +190,7 @@ export type Payment = {
   visitId: string;
   tableLabel: string;
   segmentId?: string;
+  segmentLabel?: string;
   paidAt: string;
   items: PaymentItem[];
   totalAmount: number;

@@ -8,6 +8,8 @@ type NewPaymentInput = {
   sessionId: string;
   visitId: string;
   tableLabel: string;
+  segmentId?: string;
+  segmentLabel?: string;
   items: PaymentItem[];
   totalAmount: number;
   discountAmount: number;
@@ -49,10 +51,12 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   createPayment: (input) => {
     const current = get().paymentsBySession[input.sessionId] ?? [];
     const payment: Payment = {
-      id: `payment-${input.sessionId}-${Date.now()}`,
+      id: `payment-${input.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sessionId: input.sessionId,
       visitId: input.visitId,
       tableLabel: input.tableLabel,
+      segmentId: input.segmentId,
+      segmentLabel: input.segmentLabel,
       paidAt: new Date().toISOString(),
       items: input.items,
       totalAmount: input.totalAmount,

@@ -21,13 +21,14 @@ import { usePaymentStore } from "@/stores/usePaymentStore";
 import { useReservationStore } from "@/stores/useReservationStore";
 import { useVisitStore } from "@/stores/useVisitStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
-import type { Table } from "@/types";
+import type { Order, PartyCard, Table, Visit } from "@/types";
 
 type PosWorkspaceProps = {
   sessionId: string;
 };
 
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_ORDERS: Order[] = [];
 
 export type TableModalState =
   | { type: "none" }
@@ -38,7 +39,39 @@ export type TableModalState =
   | { type: "order"; table: Table }
   | { type: "mergeConfirm"; tables: Table[] }
   | { type: "splitConfirm"; groupId: string; label: string }
+  | {
+      type: "joinConfirm";
+      table: Table;
+      partyCard: PartyCard;
+      visit: Visit;
+      tableLabel: string;
+      existingGuests: number;
+      incomingGuests: number;
+      totalGuests: number;
+      capacity: number;
+    }
+  | {
+      type: "moveJoinConfirm";
+      table: Table;
+      partyCard: PartyCard;
+      sourceVisit: Visit;
+      targetVisit: Visit;
+      sourceLabel: string;
+      targetLabel: string;
+      sourceTableIds: string[];
+      targetTableIds: string[];
+      existingGuests: number;
+      incomingGuests: number;
+      totalGuests: number;
+      capacity: number;
+    }
   | { type: "deleteConfirm"; tables: Table[] };
+
+type PartyCardMoveState = {
+  partyCard: PartyCard;
+  sourceVisit: Visit;
+  sourceLabel: string;
+};
 
 export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const language = useAppStore((state) => state.language);
@@ -66,12 +99,15 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const resetWorkspaceMode = useWorkspaceStore((state) => state.resetWorkspaceMode);
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const loadOrders = useOrderStore((state) => state.loadOrders);
+  const orders = useOrderStore((state) => state.ordersBySession[sessionId] ?? EMPTY_ORDERS);
   const loadPayments = usePaymentStore((state) => state.loadPayments);
   const loadVisits = useVisitStore((state) => state.loadVisits);
   const createWalkInVisit = useVisitStore((state) => state.createWalkInVisit);
   const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
   const getPartyCard = useVisitStore((state) => state.getPartyCard);
   const assignPartyCardToTable = useVisitStore((state) => state.assignPartyCardToTable);
+  const joinPartyCardToVisit = useVisitStore((state) => state.joinPartyCardToVisit);
+  const movePartyCardToVisit = useVisitStore((state) => state.movePartyCardToVisit);
   const completeVisitsForTable = useVisitStore((state) => state.completeVisitsForTable);
   const loadReservationSource = useReservationStore((state) => state.loadReservationSource);
   const selectedPartyCardId = useReservationStore(
@@ -81,6 +117,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     (state) => state.selectPartyCardForAssignment,
   );
   const [modal, setModal] = useState<TableModalState>({ type: "none" });
+  const [partyCardMove, setPartyCardMove] = useState<PartyCardMoveState | null>(null);
   const [menuSettingsOpen, setMenuSettingsOpen] = useState(false);
   const [salesReportOpen, setSalesReportOpen] = useState(false);
 
@@ -139,6 +176,10 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
 
   function closeModal() {
     setModal({ type: "none" });
+  }
+
+  function cancelPartyCardMove() {
+    setPartyCardMove(null);
   }
 
   function finishMode() {
@@ -237,12 +278,47 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   function assignSelectedPartyCard(table: Table) {
     if (!selectedPartyCardId) return false;
     const partyCard = getPartyCard(sessionId, selectedPartyCardId);
+    if (!partyCard) return false;
     const group = table.mergedGroupId ? getMergeGroupByTableId(sessionId, table.id) : null;
     const tableIds = group?.tableIds ?? [table.id];
     const targetCapacity = group
       ? getMergedGroupCapacity(sessionId, group.id).maxCapacity
       : table.maxCapacity;
-    if (partyCard && partyCard.guests.length > targetCapacity) {
+
+    if (table.status === "cleaning") return false;
+
+    if (table.status === "occupied") {
+      const visit = getActiveVisitForTable(sessionId, table.id);
+      if (!visit || visit.status !== "active") return false;
+      const existingGuests = visit.partyCardIds.reduce((sum, partyCardId) => {
+        const mappedCard = getPartyCard(sessionId, partyCardId);
+        return sum + (mappedCard?.guests.length ?? 0);
+      }, 0);
+      const incomingGuests = partyCard.guests.length;
+      const totalGuests = existingGuests + incomingGuests;
+      if (totalGuests > targetCapacity) {
+        setModal({
+          type: "message",
+          title: t.confirmJoinTitle,
+          body: t.joinExceedsTableCapacity,
+        });
+        return true;
+      }
+      setModal({
+        type: "joinConfirm",
+        table,
+        partyCard,
+        visit,
+        tableLabel: getTableLabel(table, tables),
+        existingGuests,
+        incomingGuests,
+        totalGuests,
+        capacity: targetCapacity,
+      });
+      return true;
+    }
+
+    if (partyCard.guests.length > targetCapacity) {
       setModal({
         type: "message",
         title: t.assignToTable,
@@ -257,6 +333,126 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     selectPartyCardForAssignment(sessionId, null);
     setModal({ type: "order", table: occupiedTable });
     return true;
+  }
+
+  function confirmJoin() {
+    if (modal.type !== "joinConfirm") return;
+    const visit = joinPartyCardToVisit(sessionId, modal.visit.id, modal.partyCard.id, {
+      targetTableIds: modal.visit.tableIds,
+      targetTableLabel: modal.tableLabel,
+      targetPreJoinOrderIds: orders
+        .filter((order) => order.visitId === modal.visit.id)
+        .map((order) => order.id),
+    });
+    if (!visit) return;
+    selectPartyCardForAssignment(sessionId, null);
+    setModal({ type: "order", table: modal.table });
+  }
+
+  function startPartyCardMove(request: PartyCardMoveState) {
+    if (request.sourceVisit.partyCardIds.length !== 1) {
+      setModal({
+        type: "message",
+        title: t.moveJoin,
+        body: t.movingFromJoinedNotSupported,
+      });
+      return;
+    }
+    selectPartyCardForAssignment(sessionId, null);
+    setPartyCardMove(request);
+  }
+
+  function selectPartyCardMoveTarget(table: Table) {
+    if (!partyCardMove) return false;
+
+    const group = table.mergedGroupId ? getMergeGroupByTableId(sessionId, table.id) : null;
+    const targetTableIds = group?.tableIds ?? [table.id];
+    const targetLabel = getTableLabel(table, tables);
+    const sameSource = partyCardMove.sourceVisit.tableIds.some((tableId) =>
+      targetTableIds.includes(tableId),
+    );
+
+    if (table.status !== "occupied" || sameSource) {
+      setModal({
+        type: "message",
+        title: t.moveJoin,
+        body: t.selectAnotherOccupiedTable,
+      });
+      return true;
+    }
+
+    const targetVisit = getActiveVisitForTable(sessionId, table.id);
+    if (!targetVisit || targetVisit.status !== "active") {
+      setModal({
+        type: "message",
+        title: t.moveJoin,
+        body: t.selectAnotherOccupiedTable,
+      });
+      return true;
+    }
+
+    const capacity = group
+      ? getMergedGroupCapacity(sessionId, group.id).maxCapacity
+      : table.maxCapacity;
+    const existingGuests = targetVisit.partyCardIds.reduce((sum, partyCardId) => {
+      const mappedCard = getPartyCard(sessionId, partyCardId);
+      return sum + (mappedCard?.guests.length ?? 0);
+    }, 0);
+    const incomingGuests = partyCardMove.partyCard.guests.length;
+    const totalGuests = existingGuests + incomingGuests;
+
+    if (totalGuests > capacity) {
+      setModal({
+        type: "message",
+        title: t.moveJoin,
+        body: t.joinExceedsTableCapacity,
+      });
+      return true;
+    }
+
+    setModal({
+      type: "moveJoinConfirm",
+      table,
+      partyCard: partyCardMove.partyCard,
+      sourceVisit: partyCardMove.sourceVisit,
+      targetVisit,
+      sourceLabel: partyCardMove.sourceLabel,
+      targetLabel,
+      sourceTableIds: partyCardMove.sourceVisit.tableIds,
+      targetTableIds,
+      existingGuests,
+      incomingGuests,
+      totalGuests,
+      capacity,
+    });
+    return true;
+  }
+
+  function confirmMoveJoin() {
+    if (modal.type !== "moveJoinConfirm") return;
+    const result = movePartyCardToVisit(
+      sessionId,
+      modal.sourceVisit.id,
+      modal.targetVisit.id,
+      modal.partyCard.id,
+      {
+        sourceTableIds: modal.sourceTableIds,
+        sourceTableLabel: modal.sourceLabel,
+        sourcePreJoinOrderIds: orders
+          .filter((order) => order.visitId === modal.sourceVisit.id)
+          .map((order) => order.id),
+        targetTableIds: modal.targetTableIds,
+        targetTableLabel: modal.targetLabel,
+        targetPreJoinOrderIds: orders
+          .filter((order) => order.visitId === modal.targetVisit.id)
+          .map((order) => order.id),
+      },
+    );
+    if (!result) return;
+    modal.sourceTableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
+    modal.targetTableIds.forEach((tableId) => updateTable(tableId, { status: "occupied" }));
+    setPartyCardMove(null);
+    closeModal();
   }
 
   const orderTable = modal.type === "order" ? modal.table : null;
@@ -283,6 +479,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
           hasDuplicateNumbers={hasDuplicateNumbers}
           onAssignSelectedPartyCard={assignSelectedPartyCard}
           onOpenModal={setModal}
+          onPartyCardMoveTarget={selectPartyCardMoveTarget}
           sessionId={sessionId}
         />
       </section>
@@ -301,6 +498,22 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         onSplit={requestSplit}
         sessionId={sessionId}
       />
+
+      {partyCardMove ? (
+        <div className="fixed bottom-6 left-1/2 z-40 w-[min(720px,calc(100vw-32px))] -translate-x-1/2 rounded-3xl border border-slate-200 bg-club-black p-4 text-white shadow-2xl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-black">{t.selectOccupiedTableToJoin}</p>
+              <p className="mt-1 text-xs font-bold text-white/70">
+                {partyCardMove.partyCard.code} · {t.table} {partyCardMove.sourceLabel}
+              </p>
+            </div>
+            <Button onClick={cancelPartyCardMove} variant="secondary">
+              {t.cancel}
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <CapacityModal modal={modal} onClose={closeModal} sessionId={sessionId} />
       <MenuSettingsModal
@@ -322,6 +535,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
 
       <OrderPanel
         onClose={closeModal}
+        onStartPartyCardMove={startPartyCardMove}
         open={modal.type === "order"}
         partyCard={activePartyCard}
         table={orderTable}
@@ -404,6 +618,85 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
 
       <Modal
         onClose={closeModal}
+        open={modal.type === "joinConfirm"}
+        title={t.confirmJoinTitle}
+      >
+        {modal.type === "joinConfirm" ? (
+          <div className="grid gap-5">
+            <p className="text-sm font-semibold text-slate-600">{t.confirmJoinPrompt}</p>
+            <div className="grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-700">
+              <p>{modal.partyCard.code}</p>
+              <p>
+                {t.table}: {modal.tableLabel}
+              </p>
+              <p>
+                {t.existingGuestCount}: {modal.existingGuests}
+              </p>
+              <p>
+                {t.incomingGuestCount}: {modal.incomingGuests}
+              </p>
+              <p>
+                {t.totalAfterJoin}: {modal.totalGuests}
+              </p>
+              <p>
+                {t.maxCapacity}: {modal.capacity}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button onClick={closeModal} variant="secondary">
+                {t.cancel}
+              </Button>
+              <Button onClick={confirmJoin}>{t.confirmJoin}</Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        onClose={closeModal}
+        open={modal.type === "moveJoinConfirm"}
+        title={t.moveJoinTitle}
+      >
+        {modal.type === "moveJoinConfirm" ? (
+          <div className="grid gap-5">
+            <p className="text-sm font-semibold text-slate-600">
+              {language === "ko"
+                ? `이 Party Card를 이동해서 ${modal.targetLabel} 테이블에 합석하시겠습니까?`
+                : `Move this party and join Table ${modal.targetLabel}?`}
+            </p>
+            <div className="grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-700">
+              <p>{modal.partyCard.code}</p>
+              <p>
+                {t.sourceTable}: {modal.sourceLabel}
+              </p>
+              <p>
+                {t.targetTable}: {modal.targetLabel}
+              </p>
+              <p>
+                {t.existingGuestCount}: {modal.existingGuests}
+              </p>
+              <p>
+                {t.incomingGuestCount}: {modal.incomingGuests}
+              </p>
+              <p>
+                {t.totalAfterJoin}: {modal.totalGuests}
+              </p>
+              <p>
+                {t.maxCapacity}: {modal.capacity}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button onClick={closeModal} variant="secondary">
+                {t.cancel}
+              </Button>
+              <Button onClick={confirmMoveJoin}>{t.confirmJoin}</Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        onClose={closeModal}
         open={modal.type === "mergeConfirm"}
         title={t.mergeSelectedTablesTitle}
       >
@@ -447,6 +740,14 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       </Modal>
     </main>
   );
+}
+
+function getTableLabel(table: Table, tables: Table[]) {
+  if (!table.mergedGroupId) return table.number;
+  const labels = tables
+    .filter((item) => item.mergedGroupId === table.mergedGroupId)
+    .map((item) => item.number);
+  return labels.length > 0 ? labels.join("+") : table.number;
 }
 
 function CapacityModal({

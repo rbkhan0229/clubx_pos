@@ -5,6 +5,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries";
 import { cn } from "@/lib/utils/cn";
 import { useAppStore } from "@/stores/useAppStore";
 import { tableStatusLabel, useTableStore } from "@/stores/useTableStore";
+import { useVisitStore } from "@/stores/useVisitStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import type { Table, TableMergeGroup } from "@/types";
 import type { TableModalState } from "@/components/pos/PosWorkspace";
@@ -14,6 +15,7 @@ type TableCanvasProps = {
   hasDuplicateNumbers: boolean;
   onOpenModal: (modal: TableModalState) => void;
   onAssignSelectedPartyCard?: (table: Table) => boolean;
+  onPartyCardMoveTarget?: (table: Table) => boolean;
 };
 
 const tableSizeClass = {
@@ -36,6 +38,7 @@ export function TableCanvas({
   hasDuplicateNumbers,
   onOpenModal,
   onAssignSelectedPartyCard,
+  onPartyCardMoveTarget,
 }: TableCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const language = useAppStore((state) => state.language);
@@ -50,6 +53,7 @@ export function TableCanvas({
   const selectTableForMergeMode = useTableStore((state) => state.selectTableForMergeMode);
   const selectedTableIds = useTableStore((state) => state.selectedTableIds);
   const mergeSelectedTableIds = useTableStore((state) => state.mergeSelectedTableIds);
+  const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
   const tableEditMode = useWorkspaceStore((state) => state.tableEditMode);
   const tableMergeMode = useWorkspaceStore((state) => state.tableMergeMode);
   const tableEditLocked = useWorkspaceStore((state) => state.tableEditLocked);
@@ -106,6 +110,10 @@ export function TableCanvas({
     }
 
     if (tableEditMode === "move" || tableEditMode === "add") return;
+
+    if (onPartyCardMoveTarget?.(table)) return;
+
+    if (table.status === "occupied" && onAssignSelectedPartyCard?.(table)) return;
 
     if (table.status === "empty") {
       if (onAssignSelectedPartyCard?.(table)) return;
@@ -211,6 +219,8 @@ export function TableCanvas({
           const selected = selectedTableIds.includes(table.id);
           const mergeSelected = mergeSelectedTableIds.includes(table.id);
           const duplicate = duplicateNumbers.has(table.number.trim());
+          const activeVisit = getActiveVisitForTable(sessionId, table.id);
+          const joined = Boolean(activeVisit?.isJoined || (activeVisit?.partyCardIds.length ?? 0) >= 2);
 
           return (
             <div
@@ -235,6 +245,11 @@ export function TableCanvas({
                 transform: "translate(-50%, -50%)",
               }}
             >
+              {joined ? (
+                <span className="absolute -right-2 -top-2 rounded-full bg-club-red px-2 py-1 text-[10px] font-black text-white shadow-sm">
+                  {t.join}
+                </span>
+              ) : null}
               {!tableEditLocked && tableEditMode === "number" ? (
                 <input
                   aria-label={`Table ${table.number} number`}
