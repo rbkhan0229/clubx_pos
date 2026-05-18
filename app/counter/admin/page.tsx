@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
+import { WaitlistOperationCard } from "@/components/admin/WaitlistOperationCard";
 import {
   api,
   ApiError,
@@ -500,6 +501,21 @@ export default function CounterAdminPage() {
           {adminError ? <ErrorCard error={adminError} /> : null}
         </section>
       ) : null}
+
+      <section className="mb-5">
+        <WaitlistOperationCard
+          initialState={
+            overview
+              ? {
+                  waitlist_open: !!overview.waitlist_open,
+                  waitlist_opened_at: overview.waitlist_opened_at,
+                  waitlist_closed_at: overview.waitlist_closed_at,
+                }
+              : null
+          }
+          onChange={() => loadAdminData()}
+        />
+      </section>
 
       <section className="mb-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-baseline justify-between gap-3">

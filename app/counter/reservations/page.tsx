@@ -299,7 +299,7 @@ export default function CounterReservationsPage() {
       return;
     setBusyId(id);
     try {
-      await api.del(`/admin/pub-reservations/reservations/${id}`);
+      await api.post(`/admin/pub-reservations/reservations/${id}/hide`);
       await load();
     } catch (err) {
       alert(

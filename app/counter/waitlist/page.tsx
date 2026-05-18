@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
+import { WaitlistOperationCard } from "@/components/admin/WaitlistOperationCard";
 import { api, ApiError } from "@/lib/api/client";
 import {
   displayFullPhone,
@@ -371,6 +372,21 @@ export default function CounterWaitlistPage() {
           {loading ? "새로고침 중..." : "새로고침"}
         </Button>
       </header>
+
+      <section className="mb-5">
+        <WaitlistOperationCard
+          initialState={
+            overview
+              ? {
+                  waitlist_open: !!overview.waitlist_open,
+                  waitlist_opened_at: overview.waitlist_opened_at,
+                  waitlist_closed_at: overview.waitlist_closed_at,
+                }
+              : null
+          }
+          onChange={() => load()}
+        />
+      </section>
 
       <OverviewPanel
         overview={overview}

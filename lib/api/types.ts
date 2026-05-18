@@ -84,6 +84,16 @@ export type AdminWaitlistOverview = {
   called_count: number;
   seated_count: number;
   current_called_number: number;
+  waitlist_open?: boolean;
+  waitlist_opened_at?: string | null;
+  waitlist_closed_at?: string | null;
+};
+
+export type AdminOperationStateResponse = {
+  event_id: string | null;
+  waitlist_open: boolean;
+  waitlist_opened_at: string | null;
+  waitlist_closed_at: string | null;
 };
 
 export type AdminWaitlistNextCallableEntry = {
