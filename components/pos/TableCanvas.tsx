@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 import { useAppStore } from "@/stores/useAppStore";
 import { tableStatusLabel, useTableStore } from "@/stores/useTableStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
-import type { Table } from "@/types";
+import type { Table, TableMergeGroup } from "@/types";
 import type { TableModalState } from "@/components/pos/PosWorkspace";
 
 type TableCanvasProps = {
@@ -23,6 +23,7 @@ const tableSizeClass = {
 };
 
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_MERGE_GROUPS: TableMergeGroup[] = [];
 
 const statusClass = {
   empty: "border-club-green bg-club-acid text-club-black",
@@ -40,11 +41,17 @@ export function TableCanvas({
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
+  const mergeGroups = useTableStore(
+    (state) => state.mergeGroupsBySession[sessionId] ?? EMPTY_MERGE_GROUPS,
+  );
   const updateTable = useTableStore((state) => state.updateTable);
   const moveTable = useTableStore((state) => state.moveTable);
   const selectTable = useTableStore((state) => state.selectTable);
+  const selectTableForMergeMode = useTableStore((state) => state.selectTableForMergeMode);
   const selectedTableIds = useTableStore((state) => state.selectedTableIds);
+  const mergeSelectedTableIds = useTableStore((state) => state.mergeSelectedTableIds);
   const tableEditMode = useWorkspaceStore((state) => state.tableEditMode);
+  const tableMergeMode = useWorkspaceStore((state) => state.tableMergeMode);
   const tableEditLocked = useWorkspaceStore((state) => state.tableEditLocked);
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
@@ -80,7 +87,20 @@ export function TableCanvas({
   }
 
   function handleTableClick(table: Table) {
+    if (tableMergeMode) {
+      selectTableForMergeMode(table.id);
+      return;
+    }
+
     if (tableEditMode === "delete" && !tableEditLocked) {
+      if (table.mergedGroupId) {
+        onOpenModal({
+          type: "message",
+          title: t.mergeSplit,
+          body: t.splitBeforeEditingMergedTable,
+        });
+        return;
+      }
       selectTable(table.id);
       return;
     }
@@ -103,6 +123,14 @@ export function TableCanvas({
 
   function startDrag(event: PointerEvent<HTMLDivElement>, table: Table) {
     if (tableEditLocked || tableEditMode !== "move") return;
+    if (table.mergedGroupId) {
+      onOpenModal({
+        type: "message",
+        title: t.mergeSplit,
+        body: t.splitBeforeEditingMergedTable,
+      });
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     setDraggingId(table.id);
   }
@@ -139,7 +167,7 @@ export function TableCanvas({
       <div
         className={cn(
           "relative h-[calc(100vh-170px)] min-h-[560px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm",
-          (tableEditMode === "add" || tableEditMode === "move") &&
+          (tableEditMode === "add" || tableEditMode === "move" || tableMergeMode) &&
             !tableEditLocked &&
             "bg-[linear-gradient(rgba(24,162,0,0.10)_1px,transparent_1px),linear-gradient(90deg,rgba(24,162,0,0.10)_1px,transparent_1px)] bg-[size:32px_32px]",
         )}
@@ -157,8 +185,31 @@ export function TableCanvas({
           </div>
         ) : null}
 
+        {mergeGroups.map((group) => {
+          const groupTables = tables.filter((table) => group.tableIds.includes(table.id));
+          if (groupTables.length === 0) return null;
+          const bounds = getGroupBounds(groupTables);
+          return (
+            <div
+              className="pointer-events-none absolute rounded-3xl border-4 border-dashed border-club-green/70 bg-lime-100/40"
+              key={group.id}
+              style={{
+                left: bounds.left,
+                top: bounds.top,
+                width: bounds.width,
+                height: bounds.height,
+              }}
+            >
+              <div className="absolute left-3 top-2 rounded-full bg-white px-3 py-1 text-sm font-black text-club-black shadow-sm">
+                {group.label}
+              </div>
+            </div>
+          );
+        })}
+
         {tables.map((table) => {
           const selected = selectedTableIds.includes(table.id);
+          const mergeSelected = mergeSelectedTableIds.includes(table.id);
           const duplicate = duplicateNumbers.has(table.number.trim());
 
           return (
@@ -168,8 +219,10 @@ export function TableCanvas({
                 tableSizeClass[table.size],
                 statusClass[table.status],
                 selected && "ring-4 ring-club-red ring-offset-2",
+                mergeSelected && "ring-4 ring-club-green ring-offset-4",
+                table.mergedGroupId && "border-dashed",
                 duplicate && "ring-4 ring-club-red/70",
-                tableEditMode === "move" && !tableEditLocked && "cursor-grab active:cursor-grabbing",
+                tableEditMode === "move" && !tableEditLocked && !table.mergedGroupId && "cursor-grab active:cursor-grabbing",
               )}
               key={table.id}
               onClick={() => handleTableClick(table)}
@@ -205,4 +258,22 @@ export function TableCanvas({
       </div>
     </section>
   );
+}
+
+function getGroupBounds(tables: Table[]) {
+  const points = tables.map((table) => {
+    const width = table.size === 1 ? 96 : table.size === 2 ? 128 : 160;
+    const height = table.size === 1 ? 80 : table.size === 2 ? 96 : 112;
+    return {
+      left: table.x - width / 2,
+      right: table.x + width / 2,
+      top: table.y - height / 2,
+      bottom: table.y + height / 2,
+    };
+  });
+  const left = Math.min(...points.map((point) => point.left)) - 10;
+  const right = Math.max(...points.map((point) => point.right)) + 10;
+  const top = Math.min(...points.map((point) => point.top)) - 10;
+  const bottom = Math.max(...points.map((point) => point.bottom)) + 10;
+  return { left, top, width: right - left, height: bottom - top };
 }

@@ -51,18 +51,29 @@ export function PosToolbar({
   const setSidebarOpen = useWorkspaceStore((state) => state.setSidebarOpen);
   const setTableEditLocked = useWorkspaceStore((state) => state.setTableEditLocked);
   const setTableEditMode = useWorkspaceStore((state) => state.setTableEditMode);
+  const tableMergeMode = useWorkspaceStore((state) => state.tableMergeMode);
+  const setTableMergeMode = useWorkspaceStore((state) => state.setTableMergeMode);
   const clearSelection = useTableStore((state) => state.clearSelection);
+  const clearMergeSelection = useTableStore((state) => state.clearMergeSelection);
   const captureMoveSnapshot = useTableStore((state) => state.captureMoveSnapshot);
   const clearMoveSnapshot = useTableStore((state) => state.clearMoveSnapshot);
 
   function chooseMode(mode: TableEditMode) {
     clearSelection();
+    clearMergeSelection();
     if (mode === "move") {
       captureMoveSnapshot(sessionId);
     } else {
       clearMoveSnapshot(sessionId);
     }
     setTableEditMode(mode);
+  }
+
+  function chooseMergeMode() {
+    clearSelection();
+    clearMergeSelection();
+    clearMoveSnapshot(sessionId);
+    setTableMergeMode(!tableMergeMode);
   }
 
   return (
@@ -103,11 +114,21 @@ export function PosToolbar({
         </section>
 
         <section className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1">
-          <Button className="px-3" disabled icon={<Combine size={16} />} variant="ghost">
+          <Button
+            className={`px-3 ${tableMergeMode ? "bg-club-acid text-club-black" : ""}`}
+            icon={<Combine size={16} />}
+            onClick={chooseMergeMode}
+            variant="ghost"
+          >
             <span className="hidden xl:inline">{t.mergeSplit}</span>
           </Button>
-          <Button className="px-3" disabled icon={<Scissors size={16} />} variant="ghost">
-            <span className="hidden xl:inline">{t.comingSoon}</span>
+          <Button
+            className={`px-3 ${tableMergeMode ? "bg-club-acid text-club-black" : ""}`}
+            icon={<Scissors size={16} />}
+            onClick={chooseMergeMode}
+            variant="ghost"
+          >
+            <span className="hidden xl:inline">{t.select}</span>
           </Button>
         </section>
 

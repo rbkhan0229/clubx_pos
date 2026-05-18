@@ -85,10 +85,12 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
   function validate() {
     const nextErrors: FieldErrors = {};
     guestDrafts.forEach((guest) => {
-      if (!guest.name.trim()) nextErrors[`name:${guest.id}`] = t.nameRequired;
-      if (/\d/.test(guest.name)) nextErrors[`name:${guest.id}`] = t.nameNoNumbers;
-      if (!guest.phone.trim()) nextErrors[`phone:${guest.id}`] = t.phoneRequired;
-      if (guest.phone.trim() && !isValidKoreanPhone(guest.phone)) {
+      const nameError = validateGuestName(guest.name, t);
+      if (nameError) nextErrors[`name:${guest.id}`] = nameError;
+
+      if (!guest.phone.trim()) {
+        nextErrors[`phone:${guest.id}`] = t.phoneRequired;
+      } else if (!isValidKoreanMobilePhone(guest.phone)) {
         nextErrors[`phone:${guest.id}`] = t.phoneInvalid;
       }
     });
@@ -103,10 +105,14 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
   }
 
   function finalSubmit() {
+    if (!validate()) {
+      setConfirmOpen(false);
+      return;
+    }
     const guests: Guest[] = guestDrafts.map((guest) => ({
       id: `guest-waiting-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       name: guest.name.trim(),
-      phone: guest.phone.trim(),
+      phone: normalizePhoneInput(guest.phone),
       checkedIn: false,
     }));
     const partyCard = createWaitingPartyCard(site.sessionId, guests);
@@ -138,9 +144,15 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
                   <button
                     className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-500 disabled:opacity-40"
                     disabled={guestDrafts.length === 1}
-                    onClick={() =>
-                      setGuestDrafts((current) => current.filter((item) => item.id !== guest.id))
-                    }
+                    onClick={() => {
+                      setGuestDrafts((current) => current.filter((item) => item.id !== guest.id));
+                      setErrors((current) => {
+                        const next = { ...current };
+                        delete next[`name:${guest.id}`];
+                        delete next[`phone:${guest.id}`];
+                        return next;
+                      });
+                    }}
                     type="button"
                   >
                     <Trash2 size={18} />
@@ -150,13 +162,31 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
                   {t.name}
                   <input
                     className="touch-target rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-club-green"
-                    onChange={(event) =>
+                    onBlur={() =>
+                      setErrors((current) => {
+                        const next = { ...current };
+                        const nameError = validateGuestName(guest.name, t);
+                        if (nameError) next[`name:${guest.id}`] = nameError;
+                        else delete next[`name:${guest.id}`];
+                        return next;
+                      })
+                    }
+                    onChange={(event) => {
+                      const nextName = event.target.value;
                       setGuestDrafts((current) =>
                         current.map((item) =>
-                          item.id === guest.id ? { ...item, name: event.target.value } : item,
+                          item.id === guest.id ? { ...item, name: nextName } : item,
                         ),
-                      )
-                    }
+                      );
+                      setErrors((current) => {
+                        if (!current[`name:${guest.id}`]) return current;
+                        const nameError = validateGuestName(nextName, t);
+                        const next = { ...current };
+                        if (nameError) next[`name:${guest.id}`] = nameError;
+                        else delete next[`name:${guest.id}`];
+                        return next;
+                      });
+                    }}
                     value={guest.name}
                   />
                   {errors[`name:${guest.id}`] ? (
@@ -168,13 +198,37 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
                   <input
                     className="touch-target rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-club-green"
                     inputMode="tel"
-                    onChange={(event) =>
+                    onBlur={() =>
+                      setErrors((current) => {
+                        const next = { ...current };
+                        if (!guest.phone.trim()) next[`phone:${guest.id}`] = t.phoneRequired;
+                        else if (!isValidKoreanMobilePhone(guest.phone)) {
+                          next[`phone:${guest.id}`] = t.phoneInvalid;
+                        } else {
+                          delete next[`phone:${guest.id}`];
+                        }
+                        return next;
+                      })
+                    }
+                    onChange={(event) => {
+                      const nextPhone = normalizePhoneInput(event.target.value);
                       setGuestDrafts((current) =>
                         current.map((item) =>
-                          item.id === guest.id ? { ...item, phone: event.target.value } : item,
+                          item.id === guest.id ? { ...item, phone: nextPhone } : item,
                         ),
-                      )
-                    }
+                      );
+                      setErrors((current) => {
+                        if (!current[`phone:${guest.id}`]) return current;
+                        const next = { ...current };
+                        if (!nextPhone.trim()) next[`phone:${guest.id}`] = t.phoneRequired;
+                        else if (!isValidKoreanMobilePhone(nextPhone)) {
+                          next[`phone:${guest.id}`] = t.phoneInvalid;
+                        } else {
+                          delete next[`phone:${guest.id}`];
+                        }
+                        return next;
+                      });
+                    }}
                     value={guest.phone}
                   />
                   {errors[`phone:${guest.id}`] ? (
@@ -194,23 +248,26 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
           </Button>
 
           <section className="rounded-2xl bg-white p-4 shadow-sm">
-            <button
-              className="w-full text-left text-sm font-black"
-              onClick={() => setPrivacyOpen((value) => !value)}
-              type="button"
+            <Button
+              className="w-full"
+              onClick={() => setPrivacyOpen(true)}
+              variant="secondary"
             >
-              {t.privacyPolicy}
-            </button>
-            {privacyOpen ? (
-              <p className="mt-3 whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">
-                {t.privacyPolicyText}
-              </p>
-            ) : null}
+              {t.viewPrivacyPolicy}
+            </Button>
             <label className="mt-3 flex items-start gap-2 text-sm font-bold text-slate-700">
               <input
                 checked={agreed}
                 className="mt-1 h-5 w-5 accent-club-green"
-                onChange={(event) => setAgreed(event.target.checked)}
+                onChange={(event) => {
+                  setAgreed(event.target.checked);
+                  setErrors((current) => {
+                    if (!event.target.checked) return current;
+                    const next = { ...current };
+                    delete next.privacy;
+                    return next;
+                  });
+                }}
                 type="checkbox"
               />
               {t.privacyAgree}
@@ -236,7 +293,7 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
               inputMode="tel"
               onChange={(event) => {
                 setLookupSubmitted(false);
-                setLookupPhone(event.target.value);
+                setLookupPhone(normalizePhoneInput(event.target.value));
               }}
               value={lookupPhone}
             />
@@ -312,6 +369,15 @@ export function WaitingSiteClient({ waitingSiteId }: { waitingSiteId: string }) 
           </div>
         </div>
       </Modal>
+      <Modal
+        onClose={() => setPrivacyOpen(false)}
+        open={privacyOpen}
+        title={t.privacyPolicy}
+      >
+        <p className="whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">
+          {t.privacyPolicyText}
+        </p>
+      </Modal>
     </WaitingShell>
   );
 }
@@ -344,8 +410,23 @@ function normalizePhone(value: string) {
   return value.replace(/[^0-9]/g, "");
 }
 
-function isValidKoreanPhone(value: string) {
-  return /^010\d{8}$/.test(normalizePhone(value));
+function normalizePhoneInput(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
+function isValidKoreanMobilePhone(value: string) {
+  return /^010-\d{4}-\d{4}$/.test(value);
+}
+
+function validateGuestName(name: string, t: ReturnType<typeof getDictionary>) {
+  const trimmed = name.trim();
+  if (!trimmed) return t.nameRequired;
+  if (/\d/.test(trimmed)) return t.nameNoNumbers;
+  return "";
 }
 
 function partyCardStatusText(

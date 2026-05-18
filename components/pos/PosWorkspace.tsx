@@ -10,6 +10,7 @@ import { RightSidebar } from "@/components/pos/RightSidebar";
 import { SalesReportModal } from "@/components/pos/SalesReportModal";
 import { TableCanvas } from "@/components/pos/TableCanvas";
 import { TableEditActionBar } from "@/components/pos/TableEditActionBar";
+import { TableMergeActionBar } from "@/components/pos/TableMergeActionBar";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { subscribeClubxSync } from "@/lib/localSync";
 import { useAppStore } from "@/stores/useAppStore";
@@ -35,6 +36,8 @@ export type TableModalState =
   | { type: "walkInConfirm"; table: Table }
   | { type: "cleaningConfirm"; table: Table }
   | { type: "order"; table: Table }
+  | { type: "mergeConfirm"; tables: Table[] }
+  | { type: "splitConfirm"; groupId: string; label: string }
   | { type: "deleteConfirm"; tables: Table[] };
 
 export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
@@ -43,14 +46,22 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const loadTables = useTableStore((state) => state.loadTables);
   const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
   const selectedTableIds = useTableStore((state) => state.selectedTableIds);
+  const mergeSelectedTableIds = useTableStore((state) => state.mergeSelectedTableIds);
   const deleteTables = useTableStore((state) => state.deleteTables);
   const updateTable = useTableStore((state) => state.updateTable);
   const clearSelection = useTableStore((state) => state.clearSelection);
+  const clearMergeSelection = useTableStore((state) => state.clearMergeSelection);
+  const createMergeGroup = useTableStore((state) => state.createMergeGroup);
+  const splitMergeGroup = useTableStore((state) => state.splitMergeGroup);
+  const getMergeGroupByTableId = useTableStore((state) => state.getMergeGroupByTableId);
+  const getMergedGroupCapacity = useTableStore((state) => state.getMergedGroupCapacity);
+  const canMergeTables = useTableStore((state) => state.canMergeTables);
   const restoreMoveSnapshot = useTableStore((state) => state.restoreMoveSnapshot);
   const clearMoveSnapshot = useTableStore((state) => state.clearMoveSnapshot);
   const sidebarOpen = useWorkspaceStore((state) => state.sidebarOpen);
   const tableEditMode = useWorkspaceStore((state) => state.tableEditMode);
   const setTableEditMode = useWorkspaceStore((state) => state.setTableEditMode);
+  const setTableMergeMode = useWorkspaceStore((state) => state.setTableMergeMode);
   const loadCapacityPreset = useWorkspaceStore((state) => state.loadCapacityPreset);
   const resetWorkspaceMode = useWorkspaceStore((state) => state.resetWorkspaceMode);
   const loadMenu = useMenuStore((state) => state.loadMenu);
@@ -82,9 +93,11 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     loadReservationSource(sessionId);
     loadCapacityPreset();
     clearSelection();
+    clearMergeSelection();
     resetWorkspaceMode();
   }, [
     clearSelection,
+    clearMergeSelection,
     loadCapacityPreset,
     loadMenu,
     loadOrders,
@@ -114,6 +127,10 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     () => tables.filter((table) => selectedTableIds.includes(table.id)),
     [selectedTableIds, tables],
   );
+  const mergeSelectedTables = useMemo(
+    () => tables.filter((table) => mergeSelectedTableIds.includes(table.id)),
+    [mergeSelectedTableIds, tables],
+  );
 
   const hasDuplicateNumbers = useMemo(() => {
     const normalized = tables.map((table) => table.number.trim()).filter(Boolean);
@@ -141,6 +158,52 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     setTableEditMode("idle");
   }
 
+  function cancelMergeMode() {
+    clearMergeSelection();
+    setTableMergeMode(false);
+  }
+
+  function requestMerge() {
+    if (!canMergeTables(sessionId, mergeSelectedTableIds)) {
+      setModal({
+        type: "message",
+        title: t.mergeSelectedTablesTitle,
+        body: t.onlyAdjacentEmptyTablesCanMerge,
+      });
+      return;
+    }
+    setModal({ type: "mergeConfirm", tables: mergeSelectedTables });
+  }
+
+  function requestSplit() {
+    const group = mergeSelectedTables[0]?.mergedGroupId
+      ? getMergeGroupByTableId(sessionId, mergeSelectedTables[0].id)
+      : null;
+    if (group) setModal({ type: "splitConfirm", groupId: group.id, label: group.label });
+  }
+
+  function confirmMerge() {
+    if (modal.type !== "mergeConfirm") return;
+    const group = createMergeGroup(sessionId, modal.tables.map((table) => table.id));
+    if (!group) {
+      setModal({
+        type: "message",
+        title: t.mergeSelectedTablesTitle,
+        body: t.onlyAdjacentEmptyTablesCanMerge,
+      });
+      return;
+    }
+    closeModal();
+    setTableMergeMode(false);
+  }
+
+  function confirmSplit() {
+    if (modal.type !== "splitConfirm") return;
+    splitMergeGroup(sessionId, modal.groupId);
+    closeModal();
+    setTableMergeMode(false);
+  }
+
   function confirmDelete() {
     if (modal.type !== "deleteConfirm") return;
     deleteTables(modal.tables.map((table) => table.id));
@@ -156,15 +219,22 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   }
 
   function confirmCleaned(table: Table) {
-    completeVisitsForTable(sessionId, table.id);
-    updateTable(table.id, { status: "empty" });
+    const group = table.mergedGroupId ? getMergeGroupByTableId(sessionId, table.id) : null;
+    const tableIds = group?.tableIds ?? [table.id];
+    tableIds.forEach((tableId) => completeVisitsForTable(sessionId, tableId));
+    tableIds.forEach((tableId) => updateTable(tableId, { status: "empty" }));
     closeModal();
   }
 
   function assignSelectedPartyCard(table: Table) {
     if (!selectedPartyCardId) return false;
     const partyCard = getPartyCard(sessionId, selectedPartyCardId);
-    if (partyCard && partyCard.guests.length > table.maxCapacity) {
+    const group = table.mergedGroupId ? getMergeGroupByTableId(sessionId, table.id) : null;
+    const tableIds = group?.tableIds ?? [table.id];
+    const targetCapacity = group
+      ? getMergedGroupCapacity(sessionId, group.id).maxCapacity
+      : table.maxCapacity;
+    if (partyCard && partyCard.guests.length > targetCapacity) {
       setModal({
         type: "message",
         title: t.assignToTable,
@@ -172,10 +242,10 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       });
       return true;
     }
-    const visit = assignPartyCardToTable(sessionId, selectedPartyCardId, table.id);
+    const visit = assignPartyCardToTable(sessionId, selectedPartyCardId, tableIds);
     if (!visit) return false;
     const occupiedTable = { ...table, status: "occupied" as const };
-    updateTable(table.id, { status: "occupied" });
+    tableIds.forEach((tableId) => updateTable(tableId, { status: "occupied" }));
     selectPartyCardForAssignment(sessionId, null);
     setModal({ type: "order", table: occupiedTable });
     return true;
@@ -216,6 +286,12 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         onCancel={cancelMode}
         onDone={finishMode}
         selectedCount={selectedTables.length}
+      />
+      <TableMergeActionBar
+        onCancel={cancelMergeMode}
+        onMerge={requestMerge}
+        onSplit={requestSplit}
+        sessionId={sessionId}
       />
 
       <CapacityModal modal={modal} onClose={closeModal} sessionId={sessionId} />
@@ -313,6 +389,50 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
               >
                 {t.deleteSelected}
               </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        onClose={closeModal}
+        open={modal.type === "mergeConfirm"}
+        title={t.mergeSelectedTablesTitle}
+      >
+        {modal.type === "mergeConfirm" ? (
+          <div className="grid gap-5">
+            <p className="text-sm font-semibold text-slate-600">
+              {t.mergeSelectedTablesPrompt}
+            </p>
+            <p className="rounded-2xl bg-slate-50 p-4 text-sm font-black">
+              {modal.tables.map((table) => `${t.table} ${table.number}`).join(", ")}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button onClick={closeModal} variant="secondary">
+                {t.cancel}
+              </Button>
+              <Button onClick={confirmMerge}>{t.merge}</Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        onClose={closeModal}
+        open={modal.type === "splitConfirm"}
+        title={t.splitMergedTableTitle}
+      >
+        {modal.type === "splitConfirm" ? (
+          <div className="grid gap-5">
+            <p className="text-sm font-semibold text-slate-600">
+              {t.splitMergedTablePrompt}
+            </p>
+            <p className="rounded-2xl bg-slate-50 p-4 text-sm font-black">{modal.label}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button onClick={closeModal} variant="secondary">
+                {t.cancel}
+              </Button>
+              <Button onClick={confirmSplit}>{t.split}</Button>
             </div>
           </div>
         ) : null}

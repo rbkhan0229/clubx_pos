@@ -22,7 +22,7 @@ type VisitState = {
   toggleGuestCheckIn: (sessionId: string, partyCardId: string, guestId: string) => void;
   checkInAllGuests: (sessionId: string, partyCardId: string) => void;
   updateOverdueReservations: (sessionId: string) => void;
-  assignPartyCardToTable: (sessionId: string, partyCardId: string, tableId: string) => Visit | undefined;
+  assignPartyCardToTable: (sessionId: string, partyCardId: string, tableId: string | string[]) => Visit | undefined;
   adjustVisitTime: (sessionId: string, visitId: string, minutes: number) => void;
   updateVisitStatus: (sessionId: string, visitId: string, status: Visit["status"]) => void;
   completeVisitsForTable: (sessionId: string, tableId: string) => void;
@@ -248,10 +248,11 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     const now = new Date().toISOString();
     const startAt =
       partyCard.type === "reservation" ? reservationDateTime(partyCard.reservationTime) : now;
+    const tableIds = Array.isArray(tableId) ? tableId : [tableId];
     const visit: Visit = {
       id: `visit-${sessionId}-${partyCardId}-${Date.now()}`,
       sessionId,
-      tableIds: [tableId],
+      tableIds,
       partyCardIds: [partyCard.id],
       sourceType: partyCard.type,
       sourceId: partyCard.id,
@@ -262,7 +263,7 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     };
     const nextPartyCards = currentPartyCards.map((card) =>
       card.id === partyCardId
-        ? { ...card, status: "seated" as const, mappedTableIds: [tableId] }
+        ? { ...card, status: "seated" as const, mappedTableIds: tableIds }
         : card,
     );
     const nextVisits = [...currentVisits, visit];

@@ -34,6 +34,15 @@ export type Table = {
   };
 };
 
+export type TableMergeGroup = {
+  id: string;
+  sessionId: string;
+  tableIds: string[];
+  label: string;
+  originalPositions: Record<string, { x: number; y: number }>;
+  createdAt: string;
+};
+
 export type MenuCategory = {
   id: string;
   sessionId: string;

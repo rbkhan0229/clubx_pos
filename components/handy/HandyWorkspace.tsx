@@ -15,12 +15,13 @@ import { useMenuStore } from "@/stores/useMenuStore";
 import { useOrderStore } from "@/stores/useOrderStore";
 import { tableStatusLabel, useTableStore } from "@/stores/useTableStore";
 import { useVisitStore } from "@/stores/useVisitStore";
-import type { MenuCategory, MenuItem, Order, StaffDevice, Table, Visit } from "@/types";
+import type { MenuCategory, MenuItem, Order, StaffDevice, Table, TableMergeGroup, Visit } from "@/types";
 
 const EMPTY_CATEGORIES: MenuCategory[] = [];
 const EMPTY_ITEMS: MenuItem[] = [];
 const EMPTY_ORDERS: Order[] = [];
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_MERGE_GROUPS: TableMergeGroup[] = [];
 const EMPTY_DEVICES: StaffDevice[] = [];
 
 type HandyMode =
@@ -50,7 +51,11 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
   const clearHandyLogin = useHandyStore((state) => state.clearHandyLogin);
   const loadTables = useTableStore((state) => state.loadTables);
   const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
+  const mergeGroups = useTableStore(
+    (state) => state.mergeGroupsBySession[sessionId] ?? EMPTY_MERGE_GROUPS,
+  );
   const updateTable = useTableStore((state) => state.updateTable);
+  const getMergeGroupByTableId = useTableStore((state) => state.getMergeGroupByTableId);
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const loadOrders = useOrderStore((state) => state.loadOrders);
   const loadVisits = useVisitStore((state) => state.loadVisits);
@@ -142,12 +147,34 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
           ) : null}
           <div className="max-h-[calc(100vh-190px)] overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm [-webkit-overflow-scrolling:touch]">
             <div className="relative h-[920px] w-[1280px] bg-white">
+            {mergeGroups.map((group) => {
+              const groupTables = tables.filter((table) => group.tableIds.includes(table.id));
+              if (groupTables.length === 0) return null;
+              const bounds = getGroupBounds(groupTables);
+              return (
+                <div
+                  className="pointer-events-none absolute rounded-3xl border-4 border-dashed border-club-green/70 bg-lime-100/40"
+                  key={group.id}
+                  style={{
+                    left: bounds.left,
+                    top: bounds.top,
+                    width: bounds.width,
+                    height: bounds.height,
+                  }}
+                >
+                  <div className="absolute left-3 top-2 rounded-full bg-white px-3 py-1 text-sm font-black text-club-black shadow-sm">
+                    {group.label}
+                  </div>
+                </div>
+              );
+            })}
             {tables.map((table) => (
               <button
                 className={cn(
                   "absolute grid place-items-center rounded-2xl border-2 p-3 text-center shadow-md transition active:scale-[0.98]",
                   tableSizeClass[table.size],
                   statusClass[table.status],
+                  table.mergedGroupId && "border-dashed",
                   table.status === "empty" && "cursor-not-allowed opacity-85",
                 )}
                 key={table.id}
@@ -198,8 +225,12 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
             <Button
               onClick={() => {
                 if (cleaningTable) {
-                  completeVisitsForTable(sessionId, cleaningTable.id);
-                  updateTable(cleaningTable.id, { status: "empty" });
+                  const group = cleaningTable.mergedGroupId
+                    ? getMergeGroupByTableId(sessionId, cleaningTable.id)
+                    : null;
+                  const tableIds = group?.tableIds ?? [cleaningTable.id];
+                  tableIds.forEach((tableId) => completeVisitsForTable(sessionId, tableId));
+                  tableIds.forEach((tableId) => updateTable(tableId, { status: "empty" }));
                 }
                 setCleaningTable(null);
               }}
@@ -284,6 +315,7 @@ function HandyAddOrder({
   const allOrders = useOrderStore(
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
+  const sessionTables = useTableStore((state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES);
   const createOrder = useOrderStore((state) => state.createOrder);
   const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
   const [activeCategoryId, setActiveCategoryId] = useState("");
@@ -330,7 +362,7 @@ function HandyAddOrder({
         quantity,
       })),
     });
-    await printOrderSlip(order, { tableNumber: table.number });
+    await printOrderSlip(order, { tableNumber: getVisitTableLabel(visit, sessionTables, table) });
     setConfirmOpen(false);
     onComplete(order, table);
   }
@@ -340,7 +372,7 @@ function HandyAddOrder({
       <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
-            {t.table} {table.number}
+            {t.table} {getHandyTableLabel(table, sessionTables)}
           </p>
           <h1 className="text-2xl font-black">{t.addOrder}</h1>
         </div>
@@ -441,6 +473,7 @@ function OrderComplete({
 }) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
+  const sessionTables = useTableStore((state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES);
 
   return (
     <section className="relative grid min-h-[70vh] place-items-center rounded-3xl bg-white p-6 text-center shadow-sm">
@@ -455,7 +488,7 @@ function OrderComplete({
       <div>
         <p className="text-4xl font-black">{t.orderComplete}</p>
         <p className="mt-5 text-lg font-black">
-          {t.table} {table.number}
+          {t.table} {getHandyTableLabel(table, sessionTables)}
         </p>
         <p className="mt-2 text-sm font-bold text-slate-500">Order #{order.orderNumber}</p>
         <p className="mt-1 text-sm font-bold text-slate-500">
@@ -496,4 +529,37 @@ function formatMoney(value: number) {
     currency: "KRW",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function getGroupBounds(tables: Table[]) {
+  const points = tables.map((table) => {
+    const width = table.size === 1 ? 96 : table.size === 2 ? 128 : 160;
+    const height = table.size === 1 ? 80 : table.size === 2 ? 96 : 112;
+    return {
+      left: table.x - width / 2,
+      right: table.x + width / 2,
+      top: table.y - height / 2,
+      bottom: table.y + height / 2,
+    };
+  });
+  const left = Math.min(...points.map((point) => point.left)) - 10;
+  const right = Math.max(...points.map((point) => point.right)) + 10;
+  const top = Math.min(...points.map((point) => point.top)) - 10;
+  const bottom = Math.max(...points.map((point) => point.bottom)) + 10;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function getHandyTableLabel(table: Table, tables: Table[]) {
+  if (!table.mergedGroupId) return table.number;
+  return tables
+    .filter((item) => item.mergedGroupId === table.mergedGroupId)
+    .map((item) => item.number)
+    .join("+");
+}
+
+function getVisitTableLabel(visit: Visit, tables: Table[], fallback: Table) {
+  const labels = visit.tableIds
+    .map((tableId) => tables.find((table) => table.id === tableId)?.number)
+    .filter((number): number is string => Boolean(number));
+  return labels.length > 0 ? labels.join("+") : fallback.number;
 }

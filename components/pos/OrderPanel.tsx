@@ -18,6 +18,7 @@ const EMPTY_ORDERS: Order[] = [];
 const EMPTY_MENU_ITEMS: MenuItem[] = [];
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
+const EMPTY_TABLES: Table[] = [];
 const EMPTY_LOGS: Array<{
   id: string;
   visitId: string;
@@ -199,7 +200,11 @@ function OrderPanelHome({
   const latestVisit = useVisitStore((state) =>
     state.visitsBySession[table.sessionId]?.find((item) => item.id === visit.id),
   );
+  const sessionTables = useTableStore(
+    (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
+  );
   const activeVisit = latestVisit ?? visit;
+  const tableLabel = getVisitTableLabel(activeVisit, sessionTables, table);
   const adjustVisitTime = useVisitStore((state) => state.adjustVisitTime);
   const partyCards = useVisitStore(
     (state) => state.partyCardsBySession[table.sessionId] ?? EMPTY_PARTY_CARDS,
@@ -295,7 +300,7 @@ function OrderPanelHome({
           {t.orderPanel}
         </p>
         <h2 className="text-4xl font-black">
-          {t.table} {table.number}
+          {t.table} {tableLabel}
         </h2>
       </section>
 
@@ -959,6 +964,9 @@ function PaymentView({
   const markPayableItemsPaid = useOrderStore((state) => state.markPayableItemsPaid);
   const createPayment = usePaymentStore((state) => state.createPayment);
   const updateTable = useTableStore((state) => state.updateTable);
+  const sessionTables = useTableStore(
+    (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
+  );
   const updateVisitStatus = useVisitStore((state) => state.updateVisitStatus);
   const [peopleCount, setPeopleCount] = useState(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -975,6 +983,7 @@ function PaymentView({
     (payment) => payment.visitId === visit.id && payment.status === "paid",
   );
   const isCheckoutOnly = !isPrepaid && totalAmount === 0 && hasPreviousPayment && orders.length > 0;
+  const tableLabel = getVisitTableLabel(visit, sessionTables, table);
 
   function updatePeopleCount(value: string) {
     const nextValue = Number.parseInt(value, 10);
@@ -985,7 +994,7 @@ function PaymentView({
     if (isCheckoutOnly) {
       setConfirmOpen(false);
       updateVisitStatus(table.sessionId, visit.id, "cleaning");
-      updateTable(table.id, { status: "cleaning" });
+      visit.tableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
       onClosePanel();
       return;
     }
@@ -997,7 +1006,7 @@ function PaymentView({
     createPayment({
       sessionId: table.sessionId,
       visitId: visit.id,
-      tableLabel: `${t.table} ${table.number}`,
+      tableLabel: `${t.table} ${tableLabel}`,
       items: paymentItems.map((item) => ({
         menuItemId: item.menuItemId,
         menuName: item.menuName,
@@ -1018,7 +1027,7 @@ function PaymentView({
     }
 
     updateVisitStatus(table.sessionId, visit.id, "cleaning");
-    updateTable(table.id, { status: "cleaning" });
+    visit.tableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
     onClosePanel();
   }
 
@@ -1026,7 +1035,7 @@ function PaymentView({
     <div className="grid gap-4">
       <div className="rounded-2xl bg-slate-50 p-4">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
-          {t.table} {table.number}
+          {t.table} {tableLabel}
         </p>
         <h3 className="text-xl font-black">
           {isCheckoutOnly ? t.finishCheckout : isPrepaid ? t.prepayment : t.payment}
@@ -1307,6 +1316,14 @@ function formatMoney(value: number) {
     currency: "KRW",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function getVisitTableLabel(visit: Visit, tables: Table[], fallback: Table) {
+  const labels = visit.tableIds
+    .map((tableId) => tables.find((table) => table.id === tableId)?.number)
+    .filter((number): number is string => Boolean(number));
+  if (labels.length === 0) return fallback.number;
+  return labels.join("+");
 }
 
 function formatRemainingTime(minutes: number, language: "ko" | "en") {

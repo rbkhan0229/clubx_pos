@@ -7,6 +7,7 @@ type WorkspaceState = {
   sidebarOpen: boolean;
   activeSidebarTab: SidebarTab;
   tableEditMode: TableEditMode;
+  tableMergeMode: boolean;
   tableEditLocked: boolean;
   lastTableCapacityPreset: {
     minCapacity: number;
@@ -16,6 +17,7 @@ type WorkspaceState = {
   toggleSidebar: () => void;
   setActiveSidebarTab: (tab: SidebarTab) => void;
   setTableEditMode: (mode: TableEditMode) => void;
+  setTableMergeMode: (active: boolean) => void;
   setTableEditLocked: (locked: boolean) => void;
   loadCapacityPreset: () => void;
   setLastTableCapacityPreset: (preset: {
@@ -31,6 +33,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   sidebarOpen: true,
   activeSidebarTab: "reservation",
   tableEditMode: "idle",
+  tableMergeMode: false,
   tableEditLocked: true,
   lastTableCapacityPreset: {
     minCapacity: 1,
@@ -39,11 +42,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setActiveSidebarTab: (tab) => set({ activeSidebarTab: tab }),
-  setTableEditMode: (mode) => set({ tableEditMode: mode }),
+  setTableEditMode: (mode) => set({ tableEditMode: mode, tableMergeMode: false }),
+  setTableMergeMode: (active) => set({ tableMergeMode: active, tableEditMode: "idle" }),
   setTableEditLocked: (locked) =>
     set({
       tableEditLocked: locked,
       tableEditMode: locked ? "idle" : "number",
+      tableMergeMode: false,
     }),
   loadCapacityPreset: () => {
     if (typeof window === "undefined") return;
@@ -71,5 +76,5 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
     set({ lastTableCapacityPreset: next });
   },
-  resetWorkspaceMode: () => set({ tableEditMode: "idle" }),
+  resetWorkspaceMode: () => set({ tableEditMode: "idle", tableMergeMode: false }),
 }));

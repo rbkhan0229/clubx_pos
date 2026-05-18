@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { broadcastClubxSync } from "@/lib/localSync";
-import type { Table, TableSize, TableStatus } from "@/types";
+import type { Table, TableMergeGroup, TableSize, TableStatus } from "@/types";
 
 type NewTableInput = {
   sessionId: string;
@@ -14,8 +14,10 @@ type NewTableInput = {
 
 type TableState = {
   tablesBySession: Record<string, Table[]>;
+  mergeGroupsBySession: Record<string, TableMergeGroup[]>;
   moveSnapshotBySession: Record<string, Table[]>;
   selectedTableIds: string[];
+  mergeSelectedTableIds: string[];
   loadTables: (sessionId: string) => void;
   addTable: (input: NewTableInput) => void;
   updateTable: (tableId: string, updates: Partial<Table>) => void;
@@ -26,9 +28,18 @@ type TableState = {
   deleteTables: (tableIds: string[]) => void;
   selectTable: (tableId: string) => void;
   clearSelection: () => void;
+  selectTableForMergeMode: (tableId: string) => void;
+  clearMergeSelection: () => void;
+  createMergeGroup: (sessionId: string, tableIds: string[]) => TableMergeGroup | undefined;
+  splitMergeGroup: (sessionId: string, groupId: string) => void;
+  getMergeGroupByTableId: (sessionId: string, tableId: string) => TableMergeGroup | undefined;
+  getMergedGroupCapacity: (sessionId: string, groupId: string) => { minCapacity: number; maxCapacity: number };
+  canMergeTables: (sessionId: string, tableIds: string[]) => boolean;
+  canSplitGroup: (sessionId: string, groupId: string) => boolean;
 };
 
 const storageKey = (sessionId: string) => `clubx-pos:tables:${sessionId}`;
+const mergeGroupKey = (sessionId: string) => `clubx-pos:table-merge-groups:${sessionId}`;
 
 function getSize(minCapacity: number, maxCapacity: number): TableSize {
   const capacity = Math.max(minCapacity, maxCapacity);
@@ -44,25 +55,50 @@ function getNextNumber(tables: Table[]) {
   return String(next);
 }
 
-function saveTables(sessionId: string, tables: Table[]) {
+function saveTables(sessionId: string, tables: Table[], groups?: TableMergeGroup[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(storageKey(sessionId), JSON.stringify(tables));
+  if (groups) window.localStorage.setItem(mergeGroupKey(sessionId), JSON.stringify(groups));
   broadcastClubxSync({ sessionId, store: "tables" });
+}
+
+function tableRadius(table: Table) {
+  const width = table.size === 1 ? 96 : table.size === 2 ? 128 : 160;
+  const height = table.size === 1 ? 80 : table.size === 2 ? 96 : 112;
+  return { halfW: width / 2, halfH: height / 2 };
+}
+
+function areAdjacent(a: Table, b: Table) {
+  const ar = tableRadius(a);
+  const br = tableRadius(b);
+  const gapX = Math.abs(a.x - b.x) - ar.halfW - br.halfW;
+  const gapY = Math.abs(a.y - b.y) - ar.halfH - br.halfH;
+  const closeX = gapX <= 40 && Math.abs(a.y - b.y) <= ar.halfH + br.halfH + 40;
+  const closeY = gapY <= 40 && Math.abs(a.x - b.x) <= ar.halfW + br.halfW + 40;
+  return closeX || closeY;
 }
 
 export const useTableStore = create<TableState>((set, get) => ({
   tablesBySession: {},
+  mergeGroupsBySession: {},
   moveSnapshotBySession: {},
   selectedTableIds: [],
+  mergeSelectedTableIds: [],
   loadTables: (sessionId) => {
     if (typeof window === "undefined") return;
 
     const raw = window.localStorage.getItem(storageKey(sessionId));
+    const rawGroups = window.localStorage.getItem(mergeGroupKey(sessionId));
     const tables = raw ? (JSON.parse(raw) as Table[]) : [];
+    const groups = rawGroups ? (JSON.parse(rawGroups) as TableMergeGroup[]) : [];
     set((state) => ({
       tablesBySession: {
         ...state.tablesBySession,
         [sessionId]: tables,
+      },
+      mergeGroupsBySession: {
+        ...state.mergeGroupsBySession,
+        [sessionId]: groups,
       },
     }));
   },
@@ -163,6 +199,109 @@ export const useTableStore = create<TableState>((set, get) => ({
         : [...state.selectedTableIds, tableId],
     })),
   clearSelection: () => set({ selectedTableIds: [] }),
+  selectTableForMergeMode: (tableId) =>
+    set((state) => ({
+      mergeSelectedTableIds: state.mergeSelectedTableIds.includes(tableId)
+        ? state.mergeSelectedTableIds.filter((id) => id !== tableId)
+        : [...state.mergeSelectedTableIds, tableId],
+    })),
+  clearMergeSelection: () => set({ mergeSelectedTableIds: [] }),
+  createMergeGroup: (sessionId, tableIds) => {
+    if (!get().canMergeTables(sessionId, tableIds)) return undefined;
+    const tables = get().tablesBySession[sessionId] ?? [];
+    const selected = tables.filter((table) => tableIds.includes(table.id));
+    const groupId = `merge-${sessionId}-${Date.now()}`;
+    const group: TableMergeGroup = {
+      id: groupId,
+      sessionId,
+      tableIds,
+      label: selected
+        .slice()
+        .sort((a, b) => Number(a.number) - Number(b.number))
+        .map((table) => table.number)
+        .join("+"),
+      originalPositions: selected.reduce<Record<string, { x: number; y: number }>>((next, table) => {
+        next[table.id] = { x: table.x, y: table.y };
+        return next;
+      }, {}),
+      createdAt: new Date().toISOString(),
+    };
+    const nextTables = tables.map((table) =>
+      tableIds.includes(table.id)
+        ? { ...table, mergedGroupId: groupId, originalPosition: { x: table.x, y: table.y } }
+        : table,
+    );
+    const nextGroups = [...(get().mergeGroupsBySession[sessionId] ?? []), group];
+    saveTables(sessionId, nextTables, nextGroups);
+    set((state) => ({
+      tablesBySession: { ...state.tablesBySession, [sessionId]: nextTables },
+      mergeGroupsBySession: { ...state.mergeGroupsBySession, [sessionId]: nextGroups },
+      mergeSelectedTableIds: [],
+    }));
+    return group;
+  },
+  splitMergeGroup: (sessionId, groupId) => {
+    if (!get().canSplitGroup(sessionId, groupId)) return;
+    const groups = get().mergeGroupsBySession[sessionId] ?? [];
+    const group = groups.find((item) => item.id === groupId);
+    if (!group) return;
+    const nextTables = (get().tablesBySession[sessionId] ?? []).map((table) => {
+      if (!group.tableIds.includes(table.id)) return table;
+      const original = group.originalPositions[table.id] ?? table.originalPosition;
+      return {
+        ...table,
+        x: original?.x ?? table.x,
+        y: original?.y ?? table.y,
+        mergedGroupId: undefined,
+      };
+    });
+    const nextGroups = groups.filter((item) => item.id !== groupId);
+    saveTables(sessionId, nextTables, nextGroups);
+    set((state) => ({
+      tablesBySession: { ...state.tablesBySession, [sessionId]: nextTables },
+      mergeGroupsBySession: { ...state.mergeGroupsBySession, [sessionId]: nextGroups },
+      mergeSelectedTableIds: [],
+    }));
+  },
+  getMergeGroupByTableId: (sessionId, tableId) =>
+    (get().mergeGroupsBySession[sessionId] ?? []).find((group) => group.tableIds.includes(tableId)),
+  getMergedGroupCapacity: (sessionId, groupId) => {
+    const group = (get().mergeGroupsBySession[sessionId] ?? []).find((item) => item.id === groupId);
+    const tables = get().tablesBySession[sessionId] ?? [];
+    const groupTables = group ? tables.filter((table) => group.tableIds.includes(table.id)) : [];
+    return {
+      minCapacity: groupTables.reduce((sum, table) => sum + table.minCapacity, 0),
+      maxCapacity: groupTables.reduce((sum, table) => sum + table.maxCapacity, 0),
+    };
+  },
+  canMergeTables: (sessionId, tableIds) => {
+    if (tableIds.length < 2) return false;
+    const tables = get().tablesBySession[sessionId] ?? [];
+    const selected = tables.filter((table) => tableIds.includes(table.id));
+    if (selected.length !== tableIds.length) return false;
+    if (selected.some((table) => table.status !== "empty" || table.mergedGroupId)) return false;
+    const connected = new Set<string>([selected[0].id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      selected.forEach((table) => {
+        if (connected.has(table.id)) return;
+        if (selected.some((other) => connected.has(other.id) && areAdjacent(table, other))) {
+          connected.add(table.id);
+          changed = true;
+        }
+      });
+    }
+    return connected.size === selected.length;
+  },
+  canSplitGroup: (sessionId, groupId) => {
+    const group = (get().mergeGroupsBySession[sessionId] ?? []).find((item) => item.id === groupId);
+    if (!group) return false;
+    const tables = get().tablesBySession[sessionId] ?? [];
+    return tables
+      .filter((table) => group.tableIds.includes(table.id))
+      .every((table) => table.status === "empty");
+  },
 }));
 
 export function tableStatusLabel(status: TableStatus) {
