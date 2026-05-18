@@ -12,11 +12,12 @@ import { useOrderStore } from "@/stores/useOrderStore";
 import { usePaymentStore } from "@/stores/usePaymentStore";
 import { useTableStore } from "@/stores/useTableStore";
 import { useVisitStore } from "@/stores/useVisitStore";
-import type { MenuCategory, MenuItem, Order, PartyCard, Table, Visit } from "@/types";
+import type { MenuCategory, MenuItem, Order, PartyCard, Payment, Table, Visit } from "@/types";
 
 const EMPTY_ORDERS: Order[] = [];
 const EMPTY_MENU_ITEMS: MenuItem[] = [];
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
+const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_LOGS: Array<{
   id: string;
   visitId: string;
@@ -193,7 +194,7 @@ function OrderPanelHome({
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
   const payments = usePaymentStore(
-    (state) => state.paymentsBySession[table.sessionId] ?? [],
+    (state) => state.paymentsBySession[table.sessionId] ?? EMPTY_PAYMENTS,
   );
   const latestVisit = useVisitStore((state) =>
     state.visitsBySession[table.sessionId]?.find((item) => item.id === visit.id),
@@ -409,8 +410,35 @@ function OrderPanelHome({
               >
                 <p className="text-xl font-black">{partyCard.code}</p>
                 <p className="mt-1 text-sm font-bold text-slate-600">
-                  {t.partyType}: {partyCard.type === "walkIn" ? t.walkIn : partyCard.type}
+                  {t.partyType}: {partyCard.type === "walkIn" ? t.walkIn : partyCard.type === "reservation" ? t.reservation : t.waitingManagement}
                 </p>
+                {partyCard.type === "reservation" ? (
+                  <div className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
+                    <p>
+                      {t.reservationTime}: {partyCard.reservationTime}
+                    </p>
+                    {partyCard.guests.map((guest) => (
+                      <div className="rounded-xl bg-white px-3 py-2" key={guest.id}>
+                        <p>{guest.name}</p>
+                        {guest.username ? (
+                          <p className="text-xs text-slate-500">@{guest.username}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {partyCard.type === "waiting" ? (
+                  <div className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
+                    <p>
+                      {t.waitingOrder}: {partyCard.waitingOrder}
+                    </p>
+                    {partyCard.guests.map((guest) => (
+                      <div className="rounded-xl bg-white px-3 py-2" key={guest.id}>
+                        <p>{guest.name}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -926,7 +954,7 @@ function PaymentView({
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
   const payments = usePaymentStore(
-    (state) => state.paymentsBySession[table.sessionId] ?? [],
+    (state) => state.paymentsBySession[table.sessionId] ?? EMPTY_PAYMENTS,
   );
   const markPayableItemsPaid = useOrderStore((state) => state.markPayableItemsPaid);
   const createPayment = usePaymentStore((state) => state.createPayment);

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { Order, OrderItem } from "@/types";
 
 type NewOrderInput = {
@@ -48,6 +49,7 @@ const orderKey = (sessionId: string) => `clubx-pos:orders:${sessionId}`;
 function saveOrders(sessionId: string, orders: Order[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(orderKey(sessionId), JSON.stringify(orders));
+  broadcastClubxSync({ sessionId, store: "orders" });
 }
 
 function normalizeItemQuantity(item: OrderItem) {

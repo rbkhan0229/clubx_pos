@@ -67,9 +67,30 @@ export type PartyCard = {
   sessionId: string;
   type: PartyCardType;
   code: string;
+  reservationTime?: string;
+  waitingOrder?: number;
   guests: Guest[];
   tableCount: number;
-  status: "waiting" | "seated" | "completed";
+  status: "waiting" | "seated" | "completed" | "overdue";
+  sourceId?: string;
+  mappedTableIds?: string[];
+};
+
+export type ReservationSource = {
+  id: string;
+  sessionId: string;
+  eventId: string;
+  eventName: string;
+  date: string;
+  importedAt: string;
+  reservationCount: number;
+};
+
+export type WaitingSite = {
+  id: string;
+  sessionId: string;
+  createdAt: string;
+  urlPath: string;
 };
 
 export type Visit = {

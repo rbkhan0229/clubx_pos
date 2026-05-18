@@ -14,11 +14,13 @@ type SalesReportModalProps = {
   onClose: () => void;
 };
 
+const EMPTY_PAYMENTS: Payment[] = [];
+
 export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalProps) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const loadPayments = usePaymentStore((state) => state.loadPayments);
-  const payments = usePaymentStore((state) => state.paymentsBySession[sessionId] ?? []);
+  const payments = usePaymentStore((state) => state.paymentsBySession[sessionId] ?? EMPTY_PAYMENTS);
   const cancelPayment = usePaymentStore((state) => state.cancelPayment);
   const [cancelTarget, setCancelTarget] = useState<Payment | null>(null);
   const totalSales = useMemo(

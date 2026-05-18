@@ -13,6 +13,7 @@ type TableCanvasProps = {
   sessionId: string;
   hasDuplicateNumbers: boolean;
   onOpenModal: (modal: TableModalState) => void;
+  onAssignSelectedPartyCard?: (table: Table) => boolean;
 };
 
 const tableSizeClass = {
@@ -20,6 +21,8 @@ const tableSizeClass = {
   2: "h-24 w-32",
   3: "h-28 w-40",
 };
+
+const EMPTY_TABLES: Table[] = [];
 
 const statusClass = {
   empty: "border-club-green bg-club-acid text-club-black",
@@ -31,11 +34,12 @@ export function TableCanvas({
   sessionId,
   hasDuplicateNumbers,
   onOpenModal,
+  onAssignSelectedPartyCard,
 }: TableCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
-  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? []);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
   const updateTable = useTableStore((state) => state.updateTable);
   const moveTable = useTableStore((state) => state.moveTable);
   const selectTable = useTableStore((state) => state.selectTable);
@@ -84,6 +88,7 @@ export function TableCanvas({
     if (tableEditMode === "move" || tableEditMode === "add") return;
 
     if (table.status === "empty") {
+      if (onAssignSelectedPartyCard?.(table)) return;
       onOpenModal({ type: "walkInConfirm", table });
       return;
     }

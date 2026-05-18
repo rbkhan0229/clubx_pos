@@ -7,6 +7,7 @@ import { Modal } from "@/components/common/Modal";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { useAppStore } from "@/stores/useAppStore";
 import { useMenuStore } from "@/stores/useMenuStore";
+import type { MenuCategory, MenuItem } from "@/types";
 
 type MenuSettingsModalProps = {
   open: boolean;
@@ -14,12 +15,15 @@ type MenuSettingsModalProps = {
   onClose: () => void;
 };
 
+const EMPTY_CATEGORIES: MenuCategory[] = [];
+const EMPTY_ITEMS: MenuItem[] = [];
+
 export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModalProps) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const loadMenu = useMenuStore((state) => state.loadMenu);
-  const categories = useMenuStore((state) => state.categoriesBySession[sessionId] ?? []);
-  const items = useMenuStore((state) => state.itemsBySession[sessionId] ?? []);
+  const categories = useMenuStore((state) => state.categoriesBySession[sessionId] ?? EMPTY_CATEGORIES);
+  const items = useMenuStore((state) => state.itemsBySession[sessionId] ?? EMPTY_ITEMS);
   const addCategory = useMenuStore((state) => state.addCategory);
   const updateCategory = useMenuStore((state) => state.updateCategory);
   const deleteCategory = useMenuStore((state) => state.deleteCategory);

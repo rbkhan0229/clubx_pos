@@ -1,5 +1,10 @@
-import { PlaceholderScreen } from "@/components/common/PlaceholderScreen";
+import { WaitingSiteClient } from "@/components/waiting/WaitingSiteClient";
 
-export default function WaitingSitePage() {
-  return <PlaceholderScreen titleKey="waitingSite" />;
+export default async function WaitingSitePage({
+  params,
+}: {
+  params: Promise<{ waitingSiteId: string }>;
+}) {
+  const { waitingSiteId } = await params;
+  return <WaitingSiteClient waitingSiteId={waitingSiteId} />;
 }

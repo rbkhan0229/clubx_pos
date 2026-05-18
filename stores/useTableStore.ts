@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { Table, TableSize, TableStatus } from "@/types";
 
 type NewTableInput = {
@@ -46,6 +47,7 @@ function getNextNumber(tables: Table[]) {
 function saveTables(sessionId: string, tables: Table[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(storageKey(sessionId), JSON.stringify(tables));
+  broadcastClubxSync({ sessionId, store: "tables" });
 }
 
 export const useTableStore = create<TableState>((set, get) => ({

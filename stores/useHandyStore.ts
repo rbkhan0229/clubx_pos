@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { StaffDevice } from "@/types";
 
 type HandyLoginState = {
@@ -44,6 +45,7 @@ function saveHandyState(
   if (typeof window === "undefined") return;
   window.localStorage.setItem(activationCodesKey, JSON.stringify(activationCodesBySession));
   window.localStorage.setItem(devicesKey, JSON.stringify(devicesBySession));
+  broadcastClubxSync({ store: "handy" });
 }
 
 function generateCode() {
@@ -71,9 +73,12 @@ export const useHandyStore = create<HandyState>((set, get) => ({
     const allCodes = new Set(Object.values(state.activationCodesBySession).flat());
     while (allCodes.has(code)) code = generateCode();
 
+    const sessionCodes = Array.isArray(state.activationCodesBySession[sessionId])
+      ? state.activationCodesBySession[sessionId]
+      : [];
     const nextCodes = {
       ...state.activationCodesBySession,
-      [sessionId]: [...(state.activationCodesBySession[sessionId] ?? []), code],
+      [sessionId]: [...sessionCodes, code],
     };
     saveHandyState(nextCodes, state.devicesBySession);
     set({ activationCodesBySession: nextCodes });
@@ -82,6 +87,7 @@ export const useHandyStore = create<HandyState>((set, get) => ({
   connectDevice: (activationCode, staffName) => {
     const code = activationCode.trim().toUpperCase();
     const sessionId = Object.keys(get().activationCodesBySession).find((id) =>
+      Array.isArray(get().activationCodesBySession[id]) &&
       get().activationCodesBySession[id].includes(code),
     );
     if (!sessionId || !staffName.trim()) return null;
@@ -94,9 +100,12 @@ export const useHandyStore = create<HandyState>((set, get) => ({
       connectedAt: new Date().toISOString(),
       status: "active",
     };
+    const sessionDevices = Array.isArray(get().devicesBySession[sessionId])
+      ? get().devicesBySession[sessionId]
+      : [];
     const nextDevices = {
       ...get().devicesBySession,
-      [sessionId]: [...(get().devicesBySession[sessionId] ?? []), device],
+      [sessionId]: [...sessionDevices, device],
     };
     const login: HandyLoginState = {
       sessionId,
@@ -114,7 +123,10 @@ export const useHandyStore = create<HandyState>((set, get) => ({
   kickDevice: (sessionId, deviceId) => {
     const nextDevices = {
       ...get().devicesBySession,
-      [sessionId]: (get().devicesBySession[sessionId] ?? []).map((device) =>
+      [sessionId]: (Array.isArray(get().devicesBySession[sessionId])
+        ? get().devicesBySession[sessionId]
+        : []
+      ).map((device) =>
         device.id === deviceId ? { ...device, status: "kicked" as const } : device,
       ),
     };
@@ -122,7 +134,10 @@ export const useHandyStore = create<HandyState>((set, get) => ({
     set({ devicesBySession: nextDevices });
   },
   getDevice: (sessionId, deviceId) =>
-    (get().devicesBySession[sessionId] ?? []).find((device) => device.id === deviceId),
+    (Array.isArray(get().devicesBySession[sessionId])
+      ? get().devicesBySession[sessionId]
+      : []
+    ).find((device) => device.id === deviceId),
   clearHandyLogin: () => {
     if (typeof window !== "undefined") window.localStorage.removeItem(handyLoginKey);
     set({ handyLogin: null });

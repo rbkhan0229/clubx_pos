@@ -7,6 +7,7 @@ import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
 import { printOrderSlip } from "@/lib/mock/printOrderSlip";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { subscribeClubxSync } from "@/lib/localSync";
 import { cn } from "@/lib/utils/cn";
 import { useAppStore } from "@/stores/useAppStore";
 import { useHandyStore } from "@/stores/useHandyStore";
@@ -14,16 +15,24 @@ import { useMenuStore } from "@/stores/useMenuStore";
 import { useOrderStore } from "@/stores/useOrderStore";
 import { tableStatusLabel, useTableStore } from "@/stores/useTableStore";
 import { useVisitStore } from "@/stores/useVisitStore";
-import type { MenuCategory, MenuItem, Order, Table, Visit } from "@/types";
+import type { MenuCategory, MenuItem, Order, StaffDevice, Table, Visit } from "@/types";
 
 const EMPTY_CATEGORIES: MenuCategory[] = [];
 const EMPTY_ITEMS: MenuItem[] = [];
 const EMPTY_ORDERS: Order[] = [];
+const EMPTY_TABLES: Table[] = [];
+const EMPTY_DEVICES: StaffDevice[] = [];
 
 type HandyMode =
   | { type: "tables" }
   | { type: "order"; table: Table }
   | { type: "complete"; table: Table; order: Order };
+
+const tableSizeClass = {
+  1: "h-20 w-24",
+  2: "h-24 w-32",
+  3: "h-28 w-40",
+};
 
 const statusClass = {
   empty: "border-club-green bg-club-acid text-club-black",
@@ -37,10 +46,10 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
   const t = getDictionary(language);
   const loadHandyState = useHandyStore((state) => state.loadHandyState);
   const handyLogin = useHandyStore((state) => state.handyLogin);
-  const getDevice = useHandyStore((state) => state.getDevice);
+  const devices = useHandyStore((state) => state.devicesBySession[sessionId] ?? EMPTY_DEVICES);
   const clearHandyLogin = useHandyStore((state) => state.clearHandyLogin);
   const loadTables = useTableStore((state) => state.loadTables);
-  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? []);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
   const updateTable = useTableStore((state) => state.updateTable);
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const loadOrders = useOrderStore((state) => state.loadOrders);
@@ -48,6 +57,8 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
   const completeVisitsForTable = useVisitStore((state) => state.completeVisitsForTable);
   const [mode, setMode] = useState<HandyMode>({ type: "tables" });
   const [cleaningTable, setCleaningTable] = useState<Table | null>(null);
+  const [message, setMessage] = useState("");
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   useEffect(() => {
     loadHandyState();
@@ -57,9 +68,22 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
     loadVisits(sessionId);
   }, [loadHandyState, loadMenu, loadOrders, loadTables, loadVisits, sessionId]);
 
+  useEffect(
+    () =>
+      subscribeClubxSync((payload) => {
+        if (payload.sessionId && payload.sessionId !== sessionId) return;
+        if (payload.store === "tables") loadTables(sessionId);
+        if (payload.store === "menu") loadMenu(sessionId);
+        if (payload.store === "orders") loadOrders(sessionId);
+        if (payload.store === "visits") loadVisits(sessionId);
+        if (payload.store === "handy") loadHandyState();
+      }),
+    [loadHandyState, loadMenu, loadOrders, loadTables, loadVisits, sessionId],
+  );
+
   const activeDevice =
     handyLogin?.sessionId === sessionId
-      ? getDevice(sessionId, handyLogin.deviceId)
+      ? devices.find((device) => device.id === handyLogin.deviceId)
       : undefined;
 
   useEffect(() => {
@@ -93,11 +117,15 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
       setCleaningTable(table);
       return;
     }
+    if (table.status === "empty") {
+      setMessage(t.emptyTableCounterOnly);
+      return;
+    }
     setMode({ type: "order", table });
   }
 
   return (
-    <HandyShell staffName={handyLogin.staffName}>
+    <HandyShell onLogout={() => setLogoutOpen(true)} staffName={handyLogin.staffName}>
       {mode.type === "tables" ? (
         <div className="grid gap-4">
           <header className="rounded-2xl bg-white p-4 shadow-sm">
@@ -105,24 +133,39 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
               Handy Order
             </p>
             <h1 className="text-2xl font-black">Session: {sessionId}</h1>
+            <p className="mt-2 text-sm font-bold text-slate-500">{t.scrollCanvasHint}</p>
           </header>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {message ? (
+            <p className="rounded-2xl bg-white p-4 text-center text-sm font-black text-slate-600 shadow-sm">
+              {message}
+            </p>
+          ) : null}
+          <div className="max-h-[calc(100vh-190px)] overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm [-webkit-overflow-scrolling:touch]">
+            <div className="relative h-[920px] w-[1280px] bg-white">
             {tables.map((table) => (
               <button
                 className={cn(
-                  "min-h-28 rounded-2xl border-2 p-4 text-center shadow-sm transition active:scale-[0.98]",
+                  "absolute grid place-items-center rounded-2xl border-2 p-3 text-center shadow-md transition active:scale-[0.98]",
+                  tableSizeClass[table.size],
                   statusClass[table.status],
+                  table.status === "empty" && "cursor-not-allowed opacity-85",
                 )}
                 key={table.id}
                 onClick={() => handleTableClick(table)}
+                style={{
+                  left: table.x,
+                  top: table.y,
+                  transform: "translate(-50%, -50%)",
+                }}
                 type="button"
               >
-                <span className="block text-3xl font-black">{table.number}</span>
-                <span className="mt-2 block text-xs font-black uppercase tracking-[0.12em] opacity-80">
+                <span className="block text-2xl font-black">{table.number}</span>
+                <span className="block text-xs font-black uppercase tracking-[0.12em] opacity-80">
                   {tableStatusLabel(table.status)}
                 </span>
               </button>
             ))}
+            </div>
           </div>
         </div>
       ) : mode.type === "order" ? (
@@ -166,15 +209,35 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       </Modal>
+      <Modal onClose={() => setLogoutOpen(false)} open={logoutOpen} title={t.handyLogoutTitle}>
+        <div className="grid gap-4">
+          <p className="text-sm font-bold text-slate-600">{t.handyLogoutPrompt}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={() => setLogoutOpen(false)} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                clearHandyLogin();
+                router.push("/login");
+              }}
+            >
+              {t.logout}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </HandyShell>
   );
 }
 
 function HandyShell({
   children,
+  onLogout,
   staffName,
 }: {
   children: React.ReactNode;
+  onLogout?: () => void;
   staffName?: string;
 }) {
   return (
@@ -183,7 +246,16 @@ function HandyShell({
         {staffName ? (
           <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 text-sm font-black shadow-sm">
             <span>ClubX Handy</span>
-            <span>{staffName}</span>
+            <div className="flex items-center gap-3">
+              <span>{staffName}</span>
+              <button
+                className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black"
+                onClick={onLogout}
+                type="button"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         ) : null}
         {children}
@@ -213,9 +285,7 @@ function HandyAddOrder({
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
   const createOrder = useOrderStore((state) => state.createOrder);
-  const createWalkInVisit = useVisitStore((state) => state.createWalkInVisit);
   const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
-  const updateTable = useTableStore((state) => state.updateTable);
   const [activeCategoryId, setActiveCategoryId] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -244,10 +314,10 @@ function HandyAddOrder({
   }
 
   async function confirmOrder() {
-    let visit: Visit | undefined = getActiveVisitForTable(table.sessionId, table.id);
+    const visit: Visit | undefined = getActiveVisitForTable(table.sessionId, table.id);
     if (!visit) {
-      visit = createWalkInVisit(table.sessionId, table.id).visit;
-      updateTable(table.id, { status: "occupied" });
+      setConfirmOpen(false);
+      return;
     }
     const order = createOrder({
       sessionId: table.sessionId,
@@ -262,7 +332,7 @@ function HandyAddOrder({
     });
     await printOrderSlip(order, { tableNumber: table.number });
     setConfirmOpen(false);
-    onComplete(order, { ...table, status: "occupied" });
+    onComplete(order, table);
   }
 
   return (

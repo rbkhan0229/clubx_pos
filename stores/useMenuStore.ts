@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { MenuCategory, MenuItem } from "@/types";
 
 type MenuState = {
@@ -25,6 +26,7 @@ function saveMenu(sessionId: string, categories: MenuCategory[], items: MenuItem
   if (typeof window === "undefined") return;
   window.localStorage.setItem(categoriesKey(sessionId), JSON.stringify(categories));
   window.localStorage.setItem(itemsKey(sessionId), JSON.stringify(items));
+  broadcastClubxSync({ sessionId, store: "menu" });
 }
 
 function findSessionForCategory(

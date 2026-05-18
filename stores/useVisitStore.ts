@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { PartyCard, TimeAdjustmentLog, Visit } from "@/types";
 
 type WalkInResult = {
@@ -14,8 +15,14 @@ type VisitState = {
   timeLogsByVisit: Record<string, TimeAdjustmentLog[]>;
   loadVisits: (sessionId: string) => void;
   createWalkInVisit: (sessionId: string, tableId: string) => WalkInResult;
+  createWaitingPartyCard: (sessionId: string, guests: PartyCard["guests"]) => PartyCard;
   getActiveVisitForTable: (sessionId: string, tableId: string) => Visit | undefined;
   getPartyCard: (sessionId: string, partyCardId: string) => PartyCard | undefined;
+  upsertPartyCards: (sessionId: string, partyCards: PartyCard[]) => void;
+  toggleGuestCheckIn: (sessionId: string, partyCardId: string, guestId: string) => void;
+  checkInAllGuests: (sessionId: string, partyCardId: string) => void;
+  updateOverdueReservations: (sessionId: string) => void;
+  assignPartyCardToTable: (sessionId: string, partyCardId: string, tableId: string) => Visit | undefined;
   adjustVisitTime: (sessionId: string, visitId: string, minutes: number) => void;
   updateVisitStatus: (sessionId: string, visitId: string, status: Visit["status"]) => void;
   completeVisitsForTable: (sessionId: string, tableId: string) => void;
@@ -35,10 +42,20 @@ function saveVisitState(
   window.localStorage.setItem(partyKey(sessionId), JSON.stringify(partyCards));
   window.localStorage.setItem(visitKey(sessionId), JSON.stringify(visits));
   window.localStorage.setItem(logKey(sessionId), JSON.stringify(logsByVisit));
+  broadcastClubxSync({ sessionId, store: "visits" });
 }
 
 function addMinutes(value: string, minutes: number) {
   return new Date(new Date(value).getTime() + minutes * 60_000).toISOString();
+}
+
+function reservationDateTime(time?: string) {
+  const now = new Date();
+  if (!time) return now.toISOString();
+  const [hour = "0", minute = "0"] = time.split(":");
+  const next = new Date(now);
+  next.setHours(Number(hour), Number(minute), 0, 0);
+  return next.toISOString();
 }
 
 export const useVisitStore = create<VisitState>((set, get) => ({
@@ -110,12 +127,158 @@ export const useVisitStore = create<VisitState>((set, get) => ({
 
     return { partyCard, visit };
   },
+  createWaitingPartyCard: (sessionId, guests) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const count = currentPartyCards.filter((card) => card.type === "waiting").length + 1;
+    const partyCard: PartyCard = {
+      id: `party-${sessionId}-waiting-${Date.now()}`,
+      sessionId,
+      type: "waiting",
+      code: `W-${String(count).padStart(3, "0")}`,
+      waitingOrder: count,
+      guests,
+      tableCount: 1,
+      status: "waiting",
+      mappedTableIds: [],
+    };
+    const nextPartyCards = [...currentPartyCards, partyCard];
+    saveVisitState(sessionId, nextPartyCards, get().visitsBySession[sessionId] ?? [], get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+    }));
+    return partyCard;
+  },
   getActiveVisitForTable: (sessionId, tableId) =>
     (get().visitsBySession[sessionId] ?? []).find(
       (visit) => visit.status === "active" && visit.tableIds.includes(tableId),
     ),
   getPartyCard: (sessionId, partyCardId) =>
     (get().partyCardsBySession[sessionId] ?? []).find((card) => card.id === partyCardId),
+  upsertPartyCards: (sessionId, partyCards) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const incomingIds = new Set(partyCards.map((card) => card.id));
+    const nextPartyCards = [
+      ...currentPartyCards.filter((card) => !incomingIds.has(card.id)),
+      ...partyCards,
+    ];
+    const visits = get().visitsBySession[sessionId] ?? [];
+    saveVisitState(sessionId, nextPartyCards, visits, get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+    }));
+  },
+  toggleGuestCheckIn: (sessionId, partyCardId, guestId) => {
+    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    const nextPartyCards = partyCards.map((card) =>
+      card.id === partyCardId
+        ? {
+            ...card,
+            guests: card.guests.map((guest) =>
+              guest.id === guestId ? { ...guest, checkedIn: !guest.checkedIn } : guest,
+            ),
+          }
+        : card,
+    );
+    saveVisitState(sessionId, nextPartyCards, get().visitsBySession[sessionId] ?? [], get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+    }));
+  },
+  checkInAllGuests: (sessionId, partyCardId) => {
+    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    const nextPartyCards = partyCards.map((card) =>
+      card.id === partyCardId
+        ? {
+            ...card,
+            guests: card.guests.map((guest) => ({ ...guest, checkedIn: true })),
+          }
+        : card,
+    );
+    saveVisitState(sessionId, nextPartyCards, get().visitsBySession[sessionId] ?? [], get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+    }));
+  },
+  updateOverdueReservations: (sessionId) => {
+    const now = Date.now();
+    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    let changed = false;
+    const nextPartyCards = partyCards.map((card) => {
+      if (card.type !== "reservation" || card.status === "seated" || card.status === "completed") {
+        return card;
+      }
+      const reservationAt = new Date(reservationDateTime(card.reservationTime)).getTime();
+      if (reservationAt < now && card.status !== "overdue") {
+        changed = true;
+        return { ...card, status: "overdue" as const };
+      }
+      if (reservationAt >= now && card.status === "overdue") {
+        changed = true;
+        return { ...card, status: "waiting" as const };
+      }
+      return card;
+    });
+    if (!changed) return;
+    saveVisitState(sessionId, nextPartyCards, get().visitsBySession[sessionId] ?? [], get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+    }));
+  },
+  assignPartyCardToTable: (sessionId, partyCardId, tableId) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const currentVisits = get().visitsBySession[sessionId] ?? [];
+    const partyCard = currentPartyCards.find((card) => card.id === partyCardId);
+    if (!partyCard || partyCard.status === "seated" || partyCard.status === "completed") return undefined;
+
+    const now = new Date().toISOString();
+    const startAt =
+      partyCard.type === "reservation" ? reservationDateTime(partyCard.reservationTime) : now;
+    const visit: Visit = {
+      id: `visit-${sessionId}-${partyCardId}-${Date.now()}`,
+      sessionId,
+      tableIds: [tableId],
+      partyCardIds: [partyCard.id],
+      sourceType: partyCard.type,
+      sourceId: partyCard.id,
+      visitCode: partyCard.code,
+      startedAt: now,
+      expectedEndAt: addMinutes(startAt, 90),
+      status: "active",
+    };
+    const nextPartyCards = currentPartyCards.map((card) =>
+      card.id === partyCardId
+        ? { ...card, status: "seated" as const, mappedTableIds: [tableId] }
+        : card,
+    );
+    const nextVisits = [...currentVisits, visit];
+    saveVisitState(sessionId, nextPartyCards, nextVisits, get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+      visitsBySession: {
+        ...state.visitsBySession,
+        [sessionId]: nextVisits,
+      },
+    }));
+    return visit;
+  },
   adjustVisitTime: (sessionId, visitId, minutes) => {
     const visits = get().visitsBySession[sessionId] ?? [];
     const nextVisits = visits.map((visit) =>
@@ -167,14 +330,24 @@ export const useVisitStore = create<VisitState>((set, get) => ({
   },
   completeVisitsForTable: (sessionId, tableId) => {
     const visits = get().visitsBySession[sessionId] ?? [];
+    const completingPartyCardIds = visits
+      .filter((visit) => visit.tableIds.includes(tableId) && visit.status !== "completed")
+      .flatMap((visit) => visit.partyCardIds);
     const nextVisits = visits.map((visit) =>
       visit.tableIds.includes(tableId) && visit.status !== "completed"
         ? { ...visit, status: "completed" as const }
         : visit,
     );
-    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    const completedIds = new Set(completingPartyCardIds);
+    const partyCards = (get().partyCardsBySession[sessionId] ?? []).map((card) =>
+      completedIds.has(card.id) ? { ...card, status: "completed" as const } : card,
+    );
     saveVisitState(sessionId, partyCards, nextVisits, get().timeLogsByVisit);
     set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: partyCards,
+      },
       visitsBySession: {
         ...state.visitsBySession,
         [sessionId]: nextVisits,

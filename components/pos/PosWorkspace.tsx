@@ -11,11 +11,13 @@ import { SalesReportModal } from "@/components/pos/SalesReportModal";
 import { TableCanvas } from "@/components/pos/TableCanvas";
 import { TableEditActionBar } from "@/components/pos/TableEditActionBar";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { subscribeClubxSync } from "@/lib/localSync";
 import { useAppStore } from "@/stores/useAppStore";
 import { useTableStore } from "@/stores/useTableStore";
 import { useMenuStore } from "@/stores/useMenuStore";
 import { useOrderStore } from "@/stores/useOrderStore";
 import { usePaymentStore } from "@/stores/usePaymentStore";
+import { useReservationStore } from "@/stores/useReservationStore";
 import { useVisitStore } from "@/stores/useVisitStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import type { Table } from "@/types";
@@ -23,6 +25,8 @@ import type { Table } from "@/types";
 type PosWorkspaceProps = {
   sessionId: string;
 };
+
+const EMPTY_TABLES: Table[] = [];
 
 export type TableModalState =
   | { type: "none" }
@@ -37,7 +41,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const loadTables = useTableStore((state) => state.loadTables);
-  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? []);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
   const selectedTableIds = useTableStore((state) => state.selectedTableIds);
   const deleteTables = useTableStore((state) => state.deleteTables);
   const updateTable = useTableStore((state) => state.updateTable);
@@ -56,7 +60,15 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const createWalkInVisit = useVisitStore((state) => state.createWalkInVisit);
   const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
   const getPartyCard = useVisitStore((state) => state.getPartyCard);
+  const assignPartyCardToTable = useVisitStore((state) => state.assignPartyCardToTable);
   const completeVisitsForTable = useVisitStore((state) => state.completeVisitsForTable);
+  const loadReservationSource = useReservationStore((state) => state.loadReservationSource);
+  const selectedPartyCardId = useReservationStore(
+    (state) => state.selectedPartyCardIdBySession[sessionId],
+  );
+  const selectPartyCardForAssignment = useReservationStore(
+    (state) => state.selectPartyCardForAssignment,
+  );
   const [modal, setModal] = useState<TableModalState>({ type: "none" });
   const [menuSettingsOpen, setMenuSettingsOpen] = useState(false);
   const [salesReportOpen, setSalesReportOpen] = useState(false);
@@ -67,6 +79,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     loadOrders(sessionId);
     loadPayments(sessionId);
     loadVisits(sessionId);
+    loadReservationSource(sessionId);
     loadCapacityPreset();
     clearSelection();
     resetWorkspaceMode();
@@ -76,11 +89,26 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     loadMenu,
     loadOrders,
     loadPayments,
+    loadReservationSource,
     loadTables,
     loadVisits,
     resetWorkspaceMode,
     sessionId,
   ]);
+
+  useEffect(
+    () =>
+      subscribeClubxSync((payload) => {
+        if (payload.sessionId && payload.sessionId !== sessionId) return;
+        if (payload.store === "tables") loadTables(sessionId);
+        if (payload.store === "menu") loadMenu(sessionId);
+        if (payload.store === "orders") loadOrders(sessionId);
+        if (payload.store === "visits") loadVisits(sessionId);
+        if (payload.store === "payments") loadPayments(sessionId);
+        if (payload.store === "reservations") loadReservationSource(sessionId);
+      }),
+    [loadMenu, loadOrders, loadPayments, loadReservationSource, loadTables, loadVisits, sessionId],
+  );
 
   const selectedTables = useMemo(
     () => tables.filter((table) => selectedTableIds.includes(table.id)),
@@ -133,6 +161,26 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     closeModal();
   }
 
+  function assignSelectedPartyCard(table: Table) {
+    if (!selectedPartyCardId) return false;
+    const partyCard = getPartyCard(sessionId, selectedPartyCardId);
+    if (partyCard && partyCard.guests.length > table.maxCapacity) {
+      setModal({
+        type: "message",
+        title: t.assignToTable,
+        body: t.partyExceedsTableCapacity,
+      });
+      return true;
+    }
+    const visit = assignPartyCardToTable(sessionId, selectedPartyCardId, table.id);
+    if (!visit) return false;
+    const occupiedTable = { ...table, status: "occupied" as const };
+    updateTable(table.id, { status: "occupied" });
+    selectPartyCardForAssignment(sessionId, null);
+    setModal({ type: "order", table: occupiedTable });
+    return true;
+  }
+
   const orderTable = modal.type === "order" ? modal.table : null;
   const activeVisit = orderTable
     ? getActiveVisitForTable(sessionId, orderTable.id) ?? null
@@ -155,6 +203,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         />
         <TableCanvas
           hasDuplicateNumbers={hasDuplicateNumbers}
+          onAssignSelectedPartyCard={assignSelectedPartyCard}
           onOpenModal={setModal}
           sessionId={sessionId}
         />

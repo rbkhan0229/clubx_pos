@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { broadcastClubxSync } from "@/lib/localSync";
 import type { Payment, PaymentItem } from "@/types";
 
 type NewPaymentInput = {
@@ -29,6 +30,7 @@ const paymentKey = (sessionId: string) => `clubx-pos:payments:${sessionId}`;
 function savePayments(sessionId: string, payments: Payment[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(paymentKey(sessionId), JSON.stringify(payments));
+  broadcastClubxSync({ sessionId, store: "payments" });
 }
 
 export const usePaymentStore = create<PaymentState>((set, get) => ({
