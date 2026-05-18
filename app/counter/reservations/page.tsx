@@ -8,6 +8,7 @@ import {
   ListOrdered,
   RefreshCw,
   Search,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
@@ -67,10 +68,12 @@ function ReservationRow({
   reservation,
   busy,
   onCancel,
+  onDelete,
 }: {
   reservation: AdminReservation;
   busy: boolean;
   onCancel: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const canCancel = reservation.status !== "cancelled";
   return (
@@ -146,7 +149,15 @@ function ReservationRow({
         </details>
       ) : null}
 
-      <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button
+          icon={<Trash2 size={16} />}
+          variant="ghost"
+          disabled={busy}
+          onClick={() => onDelete(reservation.id)}
+        >
+          예약 내역 삭제
+        </Button>
         <Button
           icon={<XCircle size={16} />}
           variant="danger"
@@ -274,6 +285,28 @@ export default function CounterReservationsPage() {
       await load();
     } catch (err) {
       alert(err instanceof ApiError ? describeAdminApiError(err) : "예약 취소에 실패했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (
+      !window.confirm(
+        "예약 내역을 삭제하시겠습니까? 이 작업은 운영 화면에서 숨겨집니다.",
+      )
+    )
+      return;
+    setBusyId(id);
+    try {
+      await api.del(`/admin/pub-reservations/reservations/${id}`);
+      await load();
+    } catch (err) {
+      alert(
+        err instanceof ApiError
+          ? describeAdminApiError(err)
+          : "예약 내역 삭제에 실패했습니다.",
+      );
     } finally {
       setBusyId(null);
     }
@@ -428,6 +461,7 @@ export default function CounterReservationsPage() {
                     reservation={r}
                     busy={busyId === r.id}
                     onCancel={handleCancel}
+                    onDelete={handleDelete}
                   />
                 ))}
               </div>
@@ -442,6 +476,7 @@ export default function CounterReservationsPage() {
               reservation={r}
               busy={busyId === r.id}
               onCancel={handleCancel}
+              onDelete={handleDelete}
             />
           ))}
         </section>
