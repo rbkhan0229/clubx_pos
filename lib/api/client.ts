@@ -7,13 +7,10 @@
  */
 
 const TOKEN_KEY = "clubx_admin_token";
+const API_BASE = process.env.NEXT_PUBLIC_CLUBX_API_BASE ?? "";
 
 export function getApiBase(): string {
-  const base =
-    (typeof process !== "undefined" &&
-      process.env.NEXT_PUBLIC_CLUBX_API_BASE) ||
-    "";
-  return base.replace(/\/+$/, "");
+  return API_BASE.replace(/\/+$/, "");
 }
 
 export function getAdminToken(): string | null {
