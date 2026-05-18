@@ -52,13 +52,15 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
   const [editConfirmOrder, setEditConfirmOrder] = useState<Order | null>(null);
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const loadOrders = useOrderStore((state) => state.loadOrders);
+  const loadPayments = usePaymentStore((state) => state.loadPayments);
 
   useEffect(() => {
     if (open && table) {
       loadMenu(table.sessionId);
       loadOrders(table.sessionId);
+      loadPayments(table.sessionId);
     }
-  }, [loadMenu, loadOrders, open, table]);
+  }, [loadMenu, loadOrders, loadPayments, open, table]);
 
   if (!table || !visit || !partyCard) return null;
 
@@ -190,6 +192,9 @@ function OrderPanelHome({
   const allOrders = useOrderStore(
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
+  const payments = usePaymentStore(
+    (state) => state.paymentsBySession[table.sessionId] ?? [],
+  );
   const latestVisit = useVisitStore((state) =>
     state.visitsBySession[table.sessionId]?.find((item) => item.id === visit.id),
   );
@@ -264,6 +269,12 @@ function OrderPanelHome({
     [summary],
   );
   const hasPayableItems = total > 0;
+  const hasPreviousPayment = payments.some(
+    (payment) => payment.visitId === activeVisit.id && payment.status === "paid",
+  );
+  const hasAnyOrderHistory = orders.length > 0;
+  const canPay = hasPayableItems || (hasPreviousPayment && hasAnyOrderHistory);
+  const isFinalCheckout = !hasPayableItems && hasPreviousPayment && hasAnyOrderHistory;
   const remainingMinutes = Math.max(
     0,
     Math.ceil((new Date(activeVisit.expectedEndAt).getTime() - Date.now()) / 60_000),
@@ -351,8 +362,8 @@ function OrderPanelHome({
             <Button disabled={!hasPayableItems} onClick={onPrepay} variant="secondary">
               {t.prepay}
             </Button>
-            <Button disabled={!hasPayableItems} onClick={onPay}>
-              {t.pay}
+            <Button disabled={!canPay} onClick={onPay}>
+              {isFinalCheckout ? t.finishCheckout : t.pay}
             </Button>
           </div>
         </section>
@@ -914,6 +925,9 @@ function PaymentView({
   const allOrders = useOrderStore(
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
+  const payments = usePaymentStore(
+    (state) => state.paymentsBySession[table.sessionId] ?? [],
+  );
   const markPayableItemsPaid = useOrderStore((state) => state.markPayableItemsPaid);
   const createPayment = usePaymentStore((state) => state.createPayment);
   const updateTable = useTableStore((state) => state.updateTable);
@@ -929,6 +943,10 @@ function PaymentView({
   const totalAmount = paymentItems.reduce((sum, row) => sum + row.amount, 0);
   const discountAmount = rows.reduce((sum, row) => sum + row.discountAmount, 0);
   const perPersonAmount = Math.floor(totalAmount / Math.max(1, peopleCount));
+  const hasPreviousPayment = payments.some(
+    (payment) => payment.visitId === visit.id && payment.status === "paid",
+  );
+  const isCheckoutOnly = !isPrepaid && totalAmount === 0 && hasPreviousPayment && orders.length > 0;
 
   function updatePeopleCount(value: string) {
     const nextValue = Number.parseInt(value, 10);
@@ -936,6 +954,14 @@ function PaymentView({
   }
 
   function completePayment() {
+    if (isCheckoutOnly) {
+      setConfirmOpen(false);
+      updateVisitStatus(table.sessionId, visit.id, "cleaning");
+      updateTable(table.id, { status: "cleaning" });
+      onClosePanel();
+      return;
+    }
+
     const allocation = rows.reduce<Record<string, number>>((next, item) => {
       next[item.menuItemId] = item.quantity;
       return next;
@@ -974,78 +1000,98 @@ function PaymentView({
         <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
           {t.table} {table.number}
         </p>
-        <h3 className="text-xl font-black">{isPrepaid ? t.prepayment : t.payment}</h3>
+        <h3 className="text-xl font-black">
+          {isCheckoutOnly ? t.finishCheckout : isPrepaid ? t.prepayment : t.payment}
+        </h3>
       </div>
 
-      <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="text-lg font-black">{t.paymentItems}</h3>
-        <div className="grid gap-2">
-          {rows.map((row) => (
-            <div
-              className="flex justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold"
-              key={`${row.menuItemId}-${row.isService ? "service" : "paid"}`}
-            >
-              <span>
-                {row.isService ? `${t.servicePrefix} ${row.menuName}` : row.menuName} x{" "}
-                {row.quantity}
-              </span>
-              <span>{formatMoney(row.amount)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {isCheckoutOnly ? (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-base font-black text-slate-700">{t.finalCheckoutMessage}</p>
+          <div className="grid gap-2 text-lg font-black sm:grid-cols-2">
+            <p>
+              {t.totalAmount}: {formatMoney(0)}
+            </p>
+            <p>
+              {t.discountAmount}: {formatMoney(0)}
+            </p>
+          </div>
+        </section>
+      ) : (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="text-lg font-black">{t.paymentItems}</h3>
+          <div className="grid gap-2">
+            {rows.map((row) => (
+              <div
+                className="flex justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold"
+                key={`${row.menuItemId}-${row.isService ? "service" : "paid"}`}
+              >
+                <span>
+                  {row.isService ? `${t.servicePrefix} ${row.menuName}` : row.menuName} x{" "}
+                  {row.quantity}
+                </span>
+                <span>{formatMoney(row.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-      <section className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="grid gap-2 text-lg font-black sm:grid-cols-2">
-          <p>
-            {t.totalAmount}: {formatMoney(totalAmount)}
+      {!isCheckoutOnly ? (
+        <section className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-2 text-lg font-black sm:grid-cols-2">
+            <p>
+              {t.totalAmount}: {formatMoney(totalAmount)}
+            </p>
+            <p>
+              {t.discountAmount}: {formatMoney(discountAmount)}
+            </p>
+          </div>
+          <label className="grid gap-2 text-sm font-bold text-slate-600 sm:max-w-xs">
+            {t.paymentPeopleCount}
+            <input
+              className="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold outline-none focus:border-club-green"
+              min={1}
+              onChange={(event) => updatePeopleCount(event.target.value)}
+              type="number"
+              value={peopleCount}
+            />
+          </label>
+          {peopleCount >= 2 ? (
+            <p className="text-lg font-black">
+              {t.perPersonAmount}: {formatMoney(perPersonAmount)}
+            </p>
+          ) : null}
+          <p className="rounded-2xl bg-white p-4 text-center text-base font-black text-club-green">
+            {t.confirmDeposit}
           </p>
-          <p>
-            {t.discountAmount}: {formatMoney(discountAmount)}
-          </p>
-        </div>
-        <label className="grid gap-2 text-sm font-bold text-slate-600 sm:max-w-xs">
-          {t.paymentPeopleCount}
-          <input
-            className="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold outline-none focus:border-club-green"
-            min={1}
-            onChange={(event) => updatePeopleCount(event.target.value)}
-            type="number"
-            value={peopleCount}
-          />
-        </label>
-        {peopleCount >= 2 ? (
-          <p className="text-lg font-black">
-            {t.perPersonAmount}: {formatMoney(perPersonAmount)}
-          </p>
-        ) : null}
-        <p className="rounded-2xl bg-white p-4 text-center text-base font-black text-club-green">
-          {t.confirmDeposit}
-        </p>
-      </section>
+        </section>
+      ) : null}
 
       <div className="sticky bottom-0 grid gap-3 bg-white pt-2 sm:grid-cols-2">
         <Button onClick={onBack} variant="secondary">
           {t.back}
         </Button>
-        <Button disabled={totalAmount <= 0} onClick={() => setConfirmOpen(true)}>
-          {isPrepaid ? t.completePrepayment : t.completePayment}
+        <Button disabled={!isCheckoutOnly && totalAmount <= 0} onClick={() => setConfirmOpen(true)}>
+          {isCheckoutOnly ? t.completeCheckout : isPrepaid ? t.completePrepayment : t.completePayment}
         </Button>
       </div>
 
       <Modal
         onClose={() => setConfirmOpen(false)}
         open={confirmOpen}
-        title={t.confirmPaymentTitle}
+        title={isCheckoutOnly ? t.confirmCheckoutTitle : t.confirmPaymentTitle}
       >
         <div className="grid gap-4">
-          <p className="text-sm font-bold text-slate-600">{t.confirmPaymentPrompt}</p>
+          <p className="text-sm font-bold text-slate-600">
+            {isCheckoutOnly ? t.confirmCheckoutPrompt : t.confirmPaymentPrompt}
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Button onClick={() => setConfirmOpen(false)} variant="secondary">
               {t.cancel}
             </Button>
             <Button onClick={completePayment}>
-              {isPrepaid ? t.completePrepayment : t.completePayment}
+              {isCheckoutOnly ? t.completeCheckout : isPrepaid ? t.completePrepayment : t.completePayment}
             </Button>
           </div>
         </div>
