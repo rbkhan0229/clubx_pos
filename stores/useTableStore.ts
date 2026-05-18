@@ -396,7 +396,7 @@ export const useTableStore = create<TableState>((set, get) => ({
     const tables = get().tablesBySession[sessionId] ?? [];
     const selected = tables.filter((table) => tableIds.includes(table.id));
     if (selected.length !== tableIds.length) return false;
-    if (selected.some((table) => table.status !== "empty" || table.mergedGroupId)) return false;
+    if (selected.some((table) => table.status === "cleaning" || table.mergedGroupId)) return false;
     const connected = new Set<string>([selected[0].id]);
     let changed = true;
     while (changed) {

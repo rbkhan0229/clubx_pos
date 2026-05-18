@@ -126,24 +126,13 @@ export type JoinRecord = {
   sourceTableIds?: string[];
   movedPartyCardId?: string;
   addedPartyCardId: string;
+  addedPartyCardIds?: string[];
   joinedAt: string;
   targetTableLabel: string;
   sourceTableLabel?: string;
   targetPreJoinOrderIds: string[];
   sourcePreJoinOrderIds?: string[];
   afterJoinOrderIds: string[];
-};
-
-export type OrderSegment = {
-  id: string;
-  sessionId: string;
-  visitId: string;
-  label: string;
-  tableLabel: string;
-  type: "preJoin" | "afterJoin";
-  sourceVisitId?: string;
-  orderIds: string[];
-  createdAt: string;
 };
 
 export type TimeAdjustmentLog = {
@@ -190,7 +179,6 @@ export type Payment = {
   visitId: string;
   tableLabel: string;
   segmentId?: string;
-  segmentLabel?: string;
   paidAt: string;
   items: PaymentItem[];
   totalAmount: number;

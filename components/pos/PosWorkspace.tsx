@@ -53,7 +53,7 @@ export type TableModalState =
   | {
       type: "moveJoinConfirm";
       table: Table;
-      partyCard: PartyCard;
+      partyCards: PartyCard[];
       sourceVisit: Visit;
       targetVisit: Visit;
       sourceLabel: string;
@@ -68,7 +68,7 @@ export type TableModalState =
   | { type: "deleteConfirm"; tables: Table[] };
 
 type PartyCardMoveState = {
-  partyCard: PartyCard;
+  partyCards: PartyCard[];
   sourceVisit: Visit;
   sourceLabel: string;
 };
@@ -109,6 +109,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const joinPartyCardToVisit = useVisitStore((state) => state.joinPartyCardToVisit);
   const movePartyCardToVisit = useVisitStore((state) => state.movePartyCardToVisit);
   const completeVisitsForTable = useVisitStore((state) => state.completeVisitsForTable);
+  const updateVisitTableIds = useVisitStore((state) => state.updateVisitTableIds);
   const loadReservationSource = useReservationStore((state) => state.loadReservationSource);
   const selectedPartyCardId = useReservationStore(
     (state) => state.selectedPartyCardIdBySession[sessionId],
@@ -205,11 +206,26 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   }
 
   function requestMerge() {
-    if (mergeSelectedTables.some((table) => table.status !== "empty" || table.mergedGroupId)) {
+    if (mergeSelectedTables.some((table) => table.status === "cleaning" || table.mergedGroupId)) {
       setModal({
         type: "message",
         title: t.mergeSelectedTablesTitle,
-        body: t.onlyEmptyTablesCanMerge,
+        body: t.onlyAdjacentEmptyTablesCanMerge,
+      });
+      return;
+    }
+    const occupiedTables = mergeSelectedTables.filter((table) => table.status === "occupied");
+    if (
+      occupiedTables.length > 1 &&
+      occupiedTables.some((table) => {
+        const visit = getActiveVisitForTable(sessionId, table.id);
+        return visit ? getPayableAmountForVisit(orders, visit.id) > 0 : false;
+      })
+    ) {
+      setModal({
+        type: "message",
+        title: t.mergeSelectedTablesTitle,
+        body: t.prepayBeforeMergeOccupiedTables,
       });
       return;
     }
@@ -228,6 +244,17 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     const group = mergeSelectedTables[0]?.mergedGroupId
       ? getMergeGroupByTableId(sessionId, mergeSelectedTables[0].id)
       : null;
+    if (group) {
+      const groupTables = tables.filter((table) => group.tableIds.includes(table.id));
+      if (groupTables.some((table) => table.status !== "empty")) {
+        setModal({
+          type: "message",
+          title: t.splitMergedTableTitle,
+          body: t.onlyEmptyMergedTablesCanSplit,
+        });
+        return;
+      }
+    }
     if (group) setModal({ type: "splitConfirm", groupId: group.id, label: group.label });
   }
 
@@ -241,6 +268,36 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         body: t.onlyAdjacentEmptyTablesCanMerge,
       });
       return;
+    }
+    const occupiedTables = modal.tables.filter((table) => table.status === "occupied");
+    const primaryVisit = occupiedTables[0]
+      ? getActiveVisitForTable(sessionId, occupiedTables[0].id)
+      : undefined;
+    if (primaryVisit) {
+      occupiedTables.slice(1).forEach((table) => {
+        const sourceVisit = getActiveVisitForTable(sessionId, table.id);
+        if (!sourceVisit || sourceVisit.id === primaryVisit.id) return;
+        movePartyCardToVisit(
+          sessionId,
+          sourceVisit.id,
+          primaryVisit.id,
+          sourceVisit.partyCardIds,
+          {
+            sourceTableIds: sourceVisit.tableIds,
+            sourceTableLabel: getTableLabel(table, tables),
+            sourcePreJoinOrderIds: orders
+              .filter((order) => order.visitId === sourceVisit.id)
+              .map((order) => order.id),
+            targetTableIds: primaryVisit.tableIds,
+            targetTableLabel: getTableLabel(occupiedTables[0], tables),
+            targetPreJoinOrderIds: orders
+              .filter((order) => order.visitId === primaryVisit.id)
+              .map((order) => order.id),
+          },
+        );
+      });
+      updateVisitTableIds(sessionId, primaryVisit.id, group.tableIds);
+      group.tableIds.forEach((tableId) => updateTable(tableId, { status: "occupied" }));
     }
     closeModal();
     setTableMergeMode(false);
@@ -350,7 +407,18 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   }
 
   function startPartyCardMove(request: PartyCardMoveState) {
-    if (request.sourceVisit.partyCardIds.length !== 1) {
+    if (getPayableAmountForVisit(orders, request.sourceVisit.id) > 0) {
+      setModal({
+        type: "message",
+        title: t.moveJoin,
+        body: t.prepayBeforeMove,
+      });
+      return;
+    }
+    if (
+      request.sourceVisit.partyCardIds.length > 1 &&
+      request.partyCards.length !== request.sourceVisit.partyCardIds.length
+    ) {
       setModal({
         type: "message",
         title: t.moveJoin,
@@ -398,14 +466,17 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       const mappedCard = getPartyCard(sessionId, partyCardId);
       return sum + (mappedCard?.guests.length ?? 0);
     }, 0);
-    const incomingGuests = partyCardMove.partyCard.guests.length;
+    const incomingGuests = partyCardMove.partyCards.reduce(
+      (sum, partyCard) => sum + partyCard.guests.length,
+      0,
+    );
     const totalGuests = existingGuests + incomingGuests;
 
     if (totalGuests > capacity) {
       setModal({
         type: "message",
         title: t.moveJoin,
-        body: t.joinExceedsTableCapacity,
+        body: t.moveExceedsTableCapacity,
       });
       return true;
     }
@@ -413,7 +484,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     setModal({
       type: "moveJoinConfirm",
       table,
-      partyCard: partyCardMove.partyCard,
+      partyCards: partyCardMove.partyCards,
       sourceVisit: partyCardMove.sourceVisit,
       targetVisit,
       sourceLabel: partyCardMove.sourceLabel,
@@ -434,7 +505,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       sessionId,
       modal.sourceVisit.id,
       modal.targetVisit.id,
-      modal.partyCard.id,
+      modal.partyCards.map((partyCard) => partyCard.id),
       {
         sourceTableIds: modal.sourceTableIds,
         sourceTableLabel: modal.sourceLabel,
@@ -505,7 +576,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
             <div>
               <p className="text-sm font-black">{t.selectOccupiedTableToJoin}</p>
               <p className="mt-1 text-xs font-bold text-white/70">
-                {partyCardMove.partyCard.code} · {t.table} {partyCardMove.sourceLabel}
+                {partyCardMove.partyCards.map((partyCard) => partyCard.code).join(", ")} · {t.table} {partyCardMove.sourceLabel}
               </p>
             </div>
             <Button onClick={cancelPartyCardMove} variant="secondary">
@@ -665,7 +736,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
                 : `Move this party and join Table ${modal.targetLabel}?`}
             </p>
             <div className="grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-700">
-              <p>{modal.partyCard.code}</p>
+              <p>{modal.partyCards.map((partyCard) => partyCard.code).join(", ")}</p>
               <p>
                 {t.sourceTable}: {modal.sourceLabel}
               </p>
@@ -748,6 +819,20 @@ function getTableLabel(table: Table, tables: Table[]) {
     .filter((item) => item.mergedGroupId === table.mergedGroupId)
     .map((item) => item.number);
   return labels.length > 0 ? labels.join("+") : table.number;
+}
+
+function getPayableAmountForVisit(orders: Order[], visitId: string) {
+  return orders
+    .filter((order) => order.visitId === visitId)
+    .flatMap((order) => order.items)
+    .reduce((sum, item) => {
+      const activeQuantity = Math.max(
+        0,
+        item.quantity - item.cancelledQuantity - (item.paidQuantity ?? 0),
+      );
+      const serviceQuantity = Math.min(item.serviceQuantity, activeQuantity);
+      return sum + (activeQuantity - serviceQuantity) * item.unitPrice;
+    }, 0);
 }
 
 function CapacityModal({

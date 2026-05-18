@@ -38,7 +38,7 @@ type VisitState = {
     sessionId: string,
     sourceVisitId: string,
     targetVisitId: string,
-    partyCardId: string,
+    partyCardIds: string[],
     metadata?: {
       sourceTableIds: string[];
       sourceTableLabel: string;
@@ -50,6 +50,7 @@ type VisitState = {
   ) => { sourceVisit: Visit; targetVisit: Visit } | undefined;
   adjustVisitTime: (sessionId: string, visitId: string, minutes: number) => void;
   updateVisitStatus: (sessionId: string, visitId: string, status: Visit["status"]) => void;
+  updateVisitTableIds: (sessionId: string, visitId: string, tableIds: string[]) => void;
   completeVisitsForTable: (sessionId: string, tableId: string) => void;
 };
 
@@ -383,10 +384,12 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     }));
     return joinedVisit;
   },
-  movePartyCardToVisit: (sessionId, sourceVisitId, targetVisitId, partyCardId, metadata) => {
+  movePartyCardToVisit: (sessionId, sourceVisitId, targetVisitId, partyCardIds, metadata) => {
     const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
     const currentVisits = get().visitsBySession[sessionId] ?? [];
-    const partyCard = currentPartyCards.find((card) => card.id === partyCardId);
+    const movingIds = [...new Set(partyCardIds)];
+    const movingIdSet = new Set(movingIds);
+    const movingCards = currentPartyCards.filter((card) => movingIdSet.has(card.id));
     const sourceVisit = currentVisits.find(
       (visit) => visit.id === sourceVisitId && visit.status === "active",
     );
@@ -395,13 +398,14 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     );
 
     if (
-      !partyCard ||
+      movingIds.length === 0 ||
+      movingCards.length !== movingIds.length ||
       !sourceVisit ||
       !targetVisit ||
       sourceVisit.id === targetVisit.id ||
-      sourceVisit.partyCardIds.length !== 1 ||
-      sourceVisit.partyCardIds[0] !== partyCardId ||
-      targetVisit.partyCardIds.includes(partyCardId)
+      sourceVisit.partyCardIds.length !== movingIds.length ||
+      !sourceVisit.partyCardIds.every((partyCardId) => movingIdSet.has(partyCardId)) ||
+      movingIds.some((partyCardId) => targetVisit.partyCardIds.includes(partyCardId))
     ) {
       return undefined;
     }
@@ -415,8 +419,9 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       sourceVisitId,
       targetTableIds: metadata?.targetTableIds ?? targetVisit.tableIds,
       sourceTableIds: metadata?.sourceTableIds ?? sourceVisit.tableIds,
-      movedPartyCardId: partyCardId,
-      addedPartyCardId: partyCardId,
+      movedPartyCardId: movingIds[0],
+      addedPartyCardId: movingIds[0],
+      addedPartyCardIds: movingIds,
       joinedAt: now,
       targetTableLabel: metadata?.targetTableLabel ?? targetVisit.visitCode,
       sourceTableLabel: metadata?.sourceTableLabel ?? sourceVisit.visitCode,
@@ -439,7 +444,7 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       if (visit.id === targetVisitId) {
         nextTargetVisit = {
           ...visit,
-          partyCardIds: [...visit.partyCardIds, partyCardId],
+          partyCardIds: [...visit.partyCardIds, ...movingIds],
           sourceType: "joined",
           isJoined: true,
           joinedAt: visit.joinedAt ?? now,
@@ -455,7 +460,7 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     const movedTargetVisit = nextTargetVisit;
 
     const nextPartyCards = currentPartyCards.map((card) =>
-      card.id === partyCardId
+      movingIdSet.has(card.id)
         ? {
             ...card,
             status: "seated" as const,
@@ -522,6 +527,20 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     const visits = get().visitsBySession[sessionId] ?? [];
     const nextVisits = visits.map((visit) =>
       visit.id === visitId ? { ...visit, status } : visit,
+    );
+    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    saveVisitState(sessionId, partyCards, nextVisits, get().timeLogsByVisit);
+    set((state) => ({
+      visitsBySession: {
+        ...state.visitsBySession,
+        [sessionId]: nextVisits,
+      },
+    }));
+  },
+  updateVisitTableIds: (sessionId, visitId, tableIds) => {
+    const visits = get().visitsBySession[sessionId] ?? [];
+    const nextVisits = visits.map((visit) =>
+      visit.id === visitId ? { ...visit, tableIds } : visit,
     );
     const partyCards = get().partyCardsBySession[sessionId] ?? [];
     saveVisitState(sessionId, partyCards, nextVisits, get().timeLogsByVisit);

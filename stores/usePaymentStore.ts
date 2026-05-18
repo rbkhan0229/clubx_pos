@@ -9,7 +9,6 @@ type NewPaymentInput = {
   visitId: string;
   tableLabel: string;
   segmentId?: string;
-  segmentLabel?: string;
   items: PaymentItem[];
   totalAmount: number;
   discountAmount: number;
@@ -56,7 +55,6 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
       visitId: input.visitId,
       tableLabel: input.tableLabel,
       segmentId: input.segmentId,
-      segmentLabel: input.segmentLabel,
       paidAt: new Date().toISOString(),
       items: input.items,
       totalAmount: input.totalAmount,

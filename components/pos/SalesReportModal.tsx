@@ -71,11 +71,6 @@ export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalP
                       <p className="text-lg font-black">
                         {payment.tableLabel} · {payment.isPrepaid ? t.prepayment : t.payment}
                       </p>
-                      {payment.segmentLabel ? (
-                        <p className="text-sm font-black text-club-green">
-                          {payment.segmentLabel}
-                        </p>
-                      ) : null}
                       <p className="text-sm font-bold text-slate-500">
                         {t.paymentDate}: {formatDate(payment.paidAt)} · {t.paymentTime}:{" "}
                         {formatTime(payment.paidAt)}
