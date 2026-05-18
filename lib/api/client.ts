@@ -5,7 +5,9 @@
  * - All responses are parsed as JSON; non-2xx throws an Error with a readable message.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_CLUBX_API_BASE ?? "";
+const DEFAULT_API_BASE =
+  "https://club-lms-for-kuba-production.up.railway.app/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_CLUBX_API_BASE || DEFAULT_API_BASE;
 
 export function getApiBase(): string {
   return API_BASE.replace(/\/+$/, "");
