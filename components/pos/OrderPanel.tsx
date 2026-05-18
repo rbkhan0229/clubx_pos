@@ -64,13 +64,27 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
     }
   }, [loadMenu, loadOrders, loadPayments, open, table]);
 
+  useEffect(() => {
+    if (!open) return;
+    setMode("summary");
+    setEditingOrder(null);
+    setEditConfirmOrder(null);
+  }, [open, table?.id, visit?.id]);
+
+  function closePanel() {
+    setMode("summary");
+    setEditingOrder(null);
+    setEditConfirmOrder(null);
+    onClose();
+  }
+
   if (!table || !visit || !partyCard) return null;
 
   return (
     <Modal
       bodyClassName="flex-1 overflow-hidden"
       className="h-[94vh] max-h-[94vh] w-[calc(100vw-24px)] max-w-none p-6"
-      onClose={onClose}
+      onClose={closePanel}
       open={open}
       title={mode === "summary" ? t.orderPanel : modeTitle(mode, t)}
     >
@@ -116,7 +130,7 @@ export function OrderPanel({ open, table, visit, partyCard, onClose }: OrderPane
           <PaymentView
             isPrepaid={mode === "prepayment"}
             onBack={() => setMode("summary")}
-            onClosePanel={onClose}
+            onClosePanel={closePanel}
             table={table}
             visit={visit}
           />

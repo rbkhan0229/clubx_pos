@@ -29,6 +29,7 @@ export function TableMergeActionBar({
   const canMergeTables = useTableStore((state) => state.canMergeTables);
   const canSplitGroup = useTableStore((state) => state.canSplitGroup);
   const selectedTables = tables.filter((table) => selectedIds.includes(table.id));
+  const hasNonEmptySelection = selectedTables.some((table) => table.status !== "empty");
   const selectedGroupId = selectedTables[0]?.mergedGroupId;
   const selectedGroupConsistent =
     selectedGroupId && selectedTables.every((table) => table.mergedGroupId === selectedGroupId);
@@ -53,6 +54,11 @@ export function TableMergeActionBar({
           <p className="text-lg font-black">
             {t.selectedTables}: {selectedIds.length}
           </p>
+          {selectedIds.length >= 2 && !canMerge && selectedTables.every((table) => !table.mergedGroupId) ? (
+            <p className="mt-1 text-sm font-bold text-club-red">
+              {hasNonEmptySelection ? t.onlyEmptyTablesCanMerge : t.selectedTablesNotAdjacent}
+            </p>
+          ) : null}
         </div>
         <div className="grid grid-cols-3 gap-2 sm:flex">
           <Button disabled={!canMerge} icon={<GitMerge size={18} />} onClick={onMerge}>

@@ -30,9 +30,9 @@ type HandyMode =
   | { type: "complete"; table: Table; order: Order };
 
 const tableSizeClass = {
-  1: "h-20 w-24",
-  2: "h-24 w-32",
-  3: "h-28 w-40",
+  1: "h-[88px] w-[88px]",
+  2: "h-[116px] w-[116px]",
+  3: "h-[116px] w-[116px]",
 };
 
 const statusClass = {
@@ -533,8 +533,8 @@ function formatMoney(value: number) {
 
 function getGroupBounds(tables: Table[]) {
   const points = tables.map((table) => {
-    const width = table.size === 1 ? 96 : table.size === 2 ? 128 : 160;
-    const height = table.size === 1 ? 80 : table.size === 2 ? 96 : 112;
+    const width = table.size === 1 ? 88 : 116;
+    const height = width;
     return {
       left: table.x - width / 2,
       right: table.x + width / 2,

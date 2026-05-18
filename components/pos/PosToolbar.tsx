@@ -12,7 +12,6 @@ import {
   Move,
   Plus,
   Redo2,
-  Scissors,
   Settings,
   Trash2,
   Undo2,
@@ -121,14 +120,6 @@ export function PosToolbar({
             variant="ghost"
           >
             <span className="hidden xl:inline">{t.mergeSplit}</span>
-          </Button>
-          <Button
-            className={`px-3 ${tableMergeMode ? "bg-club-acid text-club-black" : ""}`}
-            icon={<Scissors size={16} />}
-            onClick={chooseMergeMode}
-            variant="ghost"
-          >
-            <span className="hidden xl:inline">{t.select}</span>
           </Button>
         </section>
 

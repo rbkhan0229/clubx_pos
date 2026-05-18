@@ -164,11 +164,19 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   }
 
   function requestMerge() {
+    if (mergeSelectedTables.some((table) => table.status !== "empty" || table.mergedGroupId)) {
+      setModal({
+        type: "message",
+        title: t.mergeSelectedTablesTitle,
+        body: t.onlyEmptyTablesCanMerge,
+      });
+      return;
+    }
     if (!canMergeTables(sessionId, mergeSelectedTableIds)) {
       setModal({
         type: "message",
         title: t.mergeSelectedTablesTitle,
-        body: t.onlyAdjacentEmptyTablesCanMerge,
+        body: t.selectedTablesNotAdjacent,
       });
       return;
     }
@@ -453,12 +461,15 @@ function CapacityModal({
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const addTable = useTableStore((state) => state.addTable);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
+  const canPlaceTable = useTableStore((state) => state.canPlaceTable);
   const lastTableCapacityPreset = useWorkspaceStore(
     (state) => state.lastTableCapacityPreset,
   );
   const setLastTableCapacityPreset = useWorkspaceStore(
     (state) => state.setLastTableCapacityPreset,
   );
+  const [error, setError] = useState("");
 
   if (modal.type !== "capacity") {
     return null;
@@ -475,6 +486,23 @@ function CapacityModal({
           const maxCapacity = Number(form.get("maxCapacity") ?? minCapacity);
           const normalizedMin = Math.max(1, minCapacity);
           const normalizedMax = Math.max(normalizedMin, maxCapacity);
+          const visualSize = normalizedMax <= 2 ? 1 : 2;
+          const tempTable: Table = {
+            id: "new-table-preview",
+            sessionId,
+            number: String(tables.length + 1),
+            status: "empty",
+            size: visualSize,
+            minCapacity: normalizedMin,
+            maxCapacity: normalizedMax,
+            x: modal.x,
+            y: modal.y,
+          };
+
+          if (!canPlaceTable(sessionId, tempTable)) {
+            setError(t.tablesCannotOverlap);
+            return;
+          }
 
           setLastTableCapacityPreset({
             minCapacity: normalizedMin,
@@ -488,6 +516,7 @@ function CapacityModal({
             x: modal.x,
             y: modal.y,
           });
+          setError("");
           onClose();
         }}
       >
@@ -514,8 +543,15 @@ function CapacityModal({
           </label>
         </div>
         <div className="rounded-2xl bg-lime-50 p-4 text-sm font-semibold text-slate-700">
-          Size 1: 1-2 people · Size 2: 3-5 people · Size 3: 6+ people
+          {language === "ko"
+            ? "Size 1: 최대 2명 · Size 2: 최대 5명 이상은 같은 큰 정사각형으로 표시됩니다. 대인원은 병합 테이블을 사용해 주세요."
+            : "Size 1: max 2 people · Size 2: max 5+ renders as the same large square. Large parties should use merged tables."}
         </div>
+        {error ? (
+          <p className="rounded-2xl bg-club-red/10 p-3 text-sm font-bold text-club-red">
+            {error}
+          </p>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <button
             className="touch-target rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black"

@@ -34,6 +34,11 @@ type TableState = {
   splitMergeGroup: (sessionId: string, groupId: string) => void;
   getMergeGroupByTableId: (sessionId: string, tableId: string) => TableMergeGroup | undefined;
   getMergedGroupCapacity: (sessionId: string, groupId: string) => { minCapacity: number; maxCapacity: number };
+  canPlaceTable: (
+    sessionId: string,
+    table: Table,
+    options?: { ignoreTableIds?: string[]; ignoreGroupIds?: string[] },
+  ) => boolean;
   canMergeTables: (sessionId: string, tableIds: string[]) => boolean;
   canSplitGroup: (sessionId: string, groupId: string) => boolean;
 };
@@ -42,10 +47,7 @@ const storageKey = (sessionId: string) => `clubx-pos:tables:${sessionId}`;
 const mergeGroupKey = (sessionId: string) => `clubx-pos:table-merge-groups:${sessionId}`;
 
 function getSize(minCapacity: number, maxCapacity: number): TableSize {
-  const capacity = Math.max(minCapacity, maxCapacity);
-  if (capacity <= 2) return 1;
-  if (capacity <= 5) return 2;
-  return 3;
+  return Math.max(minCapacity, maxCapacity) <= 2 ? 1 : 2;
 }
 
 function getNextNumber(tables: Table[]) {
@@ -62,20 +64,106 @@ function saveTables(sessionId: string, tables: Table[], groups?: TableMergeGroup
   broadcastClubxSync({ sessionId, store: "tables" });
 }
 
-function tableRadius(table: Table) {
-  const width = table.size === 1 ? 96 : table.size === 2 ? 128 : 160;
-  const height = table.size === 1 ? 80 : table.size === 2 ? 96 : 112;
-  return { halfW: width / 2, halfH: height / 2 };
+type Point = { x: number; y: number };
+type Box = {
+  id: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+};
+
+function getTableVisualSize(table: Table) {
+  return table.size === 1 ? 88 : 116;
 }
 
-function areAdjacent(a: Table, b: Table) {
-  const ar = tableRadius(a);
-  const br = tableRadius(b);
-  const gapX = Math.abs(a.x - b.x) - ar.halfW - br.halfW;
-  const gapY = Math.abs(a.y - b.y) - ar.halfH - br.halfH;
-  const closeX = gapX <= 40 && Math.abs(a.y - b.y) <= ar.halfH + br.halfH + 40;
-  const closeY = gapY <= 40 && Math.abs(a.x - b.x) <= ar.halfW + br.halfW + 40;
-  return closeX || closeY;
+export function getTableBounds(table: Table): Box {
+  const size = getTableVisualSize(table);
+  return {
+    id: table.id,
+    left: table.x - size / 2,
+    right: table.x + size / 2,
+    top: table.y - size / 2,
+    bottom: table.y + size / 2,
+    centerX: table.x,
+    centerY: table.y,
+  };
+}
+
+export function doRectsOverlap(a: Box, b: Box) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function getGroupBounds(tables: Table[], group: TableMergeGroup): Box | null {
+  const groupTables = tables.filter((table) => group.tableIds.includes(table.id));
+  if (groupTables.length === 0) return null;
+  const boxes = groupTables.map(getTableBounds);
+  const left = Math.min(...boxes.map((box) => box.left)) - 10;
+  const right = Math.max(...boxes.map((box) => box.right)) + 10;
+  const top = Math.min(...boxes.map((box) => box.top)) - 10;
+  const bottom = Math.max(...boxes.map((box) => box.bottom)) + 10;
+  return {
+    id: group.id,
+    left,
+    right,
+    top,
+    bottom,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+  };
+}
+
+function candidateSegments(a: Box, b: Box): Array<[Point, Point]> {
+  const aNearestX = a.centerX < b.centerX ? a.right : a.left;
+  const bNearestX = a.centerX < b.centerX ? b.left : b.right;
+  const aNearestY = a.centerY < b.centerY ? a.bottom : a.top;
+  const bNearestY = a.centerY < b.centerY ? b.top : b.bottom;
+
+  return [
+    [{ x: a.centerX, y: a.centerY }, { x: b.centerX, y: b.centerY }],
+    [{ x: aNearestX, y: aNearestY }, { x: bNearestX, y: bNearestY }],
+    [{ x: a.centerX, y: a.top }, { x: b.centerX, y: b.top }],
+    [{ x: a.centerX, y: a.bottom }, { x: b.centerX, y: b.bottom }],
+    [{ x: a.left, y: a.centerY }, { x: b.left, y: b.centerY }],
+    [{ x: a.right, y: a.centerY }, { x: b.right, y: b.centerY }],
+  ];
+}
+
+function segmentIntersectsBox(start: Point, end: Point, box: Box) {
+  if (pointInsideBox(start, box) || pointInsideBox(end, box)) return true;
+  const corners = [
+    { x: box.left, y: box.top },
+    { x: box.right, y: box.top },
+    { x: box.right, y: box.bottom },
+    { x: box.left, y: box.bottom },
+  ];
+  return corners.some((corner, index) =>
+    segmentsIntersect(start, end, corner, corners[(index + 1) % corners.length]),
+  );
+}
+
+function pointInsideBox(point: Point, box: Box) {
+  return point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+}
+
+function segmentsIntersect(a: Point, b: Point, c: Point, d: Point) {
+  const ccw = (p1: Point, p2: Point, p3: Point) =>
+    (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x);
+  return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+}
+
+function areAdjacent(a: Table, b: Table, selectedIds: Set<string>, allTables: Table[]) {
+  const aBox = getTableBounds(a);
+  const bBox = getTableBounds(b);
+  const blockers = allTables
+    .filter((table) => table.id !== a.id && table.id !== b.id && !selectedIds.has(table.id))
+    .map(getTableBounds);
+
+  return candidateSegments(aBox, bBox).some(([start, end]) =>
+    blockers.every((box) => !segmentIntersectsBox(start, end, box)),
+  );
 }
 
 export const useTableStore = create<TableState>((set, get) => ({
@@ -116,6 +204,7 @@ export const useTableStore = create<TableState>((set, get) => ({
       y,
       originalPosition: { x, y },
     };
+    if (!get().canPlaceTable(sessionId, table)) return;
     const next = [...current, table];
 
     saveTables(sessionId, next);
@@ -145,7 +234,18 @@ export const useTableStore = create<TableState>((set, get) => ({
       },
     }));
   },
-  moveTable: (tableId, x, y) => get().updateTable(tableId, { x, y }),
+  moveTable: (tableId, x, y) => {
+    const state = get();
+    const sessionId = Object.keys(state.tablesBySession).find((id) =>
+      state.tablesBySession[id].some((table) => table.id === tableId),
+    );
+    if (!sessionId) return;
+    const table = state.tablesBySession[sessionId].find((item) => item.id === tableId);
+    if (!table) return;
+    const nextTable = { ...table, x, y };
+    if (!get().canPlaceTable(sessionId, nextTable, { ignoreTableIds: [tableId] })) return;
+    get().updateTable(tableId, { x, y });
+  },
   captureMoveSnapshot: (sessionId) =>
     set((state) => ({
       moveSnapshotBySession: {
@@ -274,6 +374,23 @@ export const useTableStore = create<TableState>((set, get) => ({
       maxCapacity: groupTables.reduce((sum, table) => sum + table.maxCapacity, 0),
     };
   },
+  canPlaceTable: (sessionId, table, options) => {
+    const ignoreTableIds = new Set(options?.ignoreTableIds ?? [table.id]);
+    const ignoreGroupIds = new Set(options?.ignoreGroupIds ?? []);
+    if (table.mergedGroupId) ignoreGroupIds.add(table.mergedGroupId);
+    const tables = get().tablesBySession[sessionId] ?? [];
+    const groups = get().mergeGroupsBySession[sessionId] ?? [];
+    const target = getTableBounds(table);
+    const overlapsTable = tables.some(
+      (item) => !ignoreTableIds.has(item.id) && doRectsOverlap(target, getTableBounds(item)),
+    );
+    if (overlapsTable) return false;
+    return groups.every((group) => {
+      if (ignoreGroupIds.has(group.id)) return true;
+      const bounds = getGroupBounds(tables, group);
+      return !bounds || !doRectsOverlap(target, bounds);
+    });
+  },
   canMergeTables: (sessionId, tableIds) => {
     if (tableIds.length < 2) return false;
     const tables = get().tablesBySession[sessionId] ?? [];
@@ -286,13 +403,36 @@ export const useTableStore = create<TableState>((set, get) => ({
       changed = false;
       selected.forEach((table) => {
         if (connected.has(table.id)) return;
-        if (selected.some((other) => connected.has(other.id) && areAdjacent(table, other))) {
+        if (
+          selected.some((other) =>
+            connected.has(other.id) && areAdjacent(table, other, new Set(tableIds), tables),
+          )
+        ) {
           connected.add(table.id);
           changed = true;
         }
       });
     }
-    return connected.size === selected.length;
+    if (connected.size !== selected.length) return false;
+    const groups = get().mergeGroupsBySession[sessionId] ?? [];
+    const groupBounds = getGroupBounds(tables, {
+      id: "candidate",
+      sessionId,
+      tableIds,
+      label: "",
+      originalPositions: {},
+      createdAt: "",
+    });
+    if (!groupBounds) return false;
+    const selectedIds = new Set(tableIds);
+    const overlapsUnrelatedTable = tables.some(
+      (table) => !selectedIds.has(table.id) && doRectsOverlap(groupBounds, getTableBounds(table)),
+    );
+    if (overlapsUnrelatedTable) return false;
+    return groups.every((group) => {
+      const bounds = getGroupBounds(tables, group);
+      return !bounds || !doRectsOverlap(groupBounds, bounds);
+    });
   },
   canSplitGroup: (sessionId, groupId) => {
     const group = (get().mergeGroupsBySession[sessionId] ?? []).find((item) => item.id === groupId);
