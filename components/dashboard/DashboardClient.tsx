@@ -2,7 +2,16 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownAZ, ArrowUpAZ, CalendarCheck2, LogOut, Plus, Settings, Users } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  CalendarCheck2,
+  LayoutDashboard,
+  LogOut,
+  Plus,
+  Settings,
+  Users,
+} from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
@@ -78,6 +87,13 @@ export function DashboardClient() {
         <div className="flex flex-wrap gap-3">
           <Button icon={<Plus size={19} />} onClick={() => setModalOpen(true)}>
             {t.createSession}
+          </Button>
+          <Button
+            icon={<LayoutDashboard size={18} />}
+            onClick={() => router.push("/counter/admin")}
+            variant="secondary"
+          >
+            Admin Dashboard
           </Button>
           <Button
             icon={<CalendarCheck2 size={18} />}
