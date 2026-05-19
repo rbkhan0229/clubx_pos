@@ -4,3 +4,7 @@ node_modules
 .npm-cache
 *.log
 .env*
+data/*.json
+data/*.csv
+*.reservation-export.json
+*.reservation-export.csv

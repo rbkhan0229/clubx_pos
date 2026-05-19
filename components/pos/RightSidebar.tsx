@@ -1,16 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import type { ChangeEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   Check,
   Copy,
   ExternalLink,
+  FileJson,
   Hourglass,
+  RefreshCcw,
   Smartphone,
   UploadCloud,
 } from "lucide-react";
+import { getApiBase } from "@/lib/api/client";
+import type { AdminReservation } from "@/lib/api/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { subscribeClubxSync } from "@/lib/localSync";
 import { mockClubXEvents } from "@/lib/mock/reservations";
@@ -132,9 +136,18 @@ function ReservationSourcePanel({ sessionId }: { sessionId: string }) {
   const t = getDictionary(language);
   const loadReservationSource = useReservationStore((state) => state.loadReservationSource);
   const importMockReservations = useReservationStore((state) => state.importMockReservations);
+  const syncPublicReservations = useReservationStore((state) => state.syncPublicReservations);
+  const importPublicReservationsSnapshot = useReservationStore(
+    (state) => state.importPublicReservationsSnapshot,
+  );
   const source = useReservationStore((state) => state.sourcesBySession[sessionId]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [fileMessage, setFileMessage] = useState("");
 
   useEffect(() => {
     loadReservationSource(sessionId);
@@ -153,10 +166,97 @@ function ReservationSourcePanel({ sessionId }: { sessionId: string }) {
     event.eventName.toLowerCase().includes(query.trim().toLowerCase()),
   );
 
+  async function handlePublicSync() {
+    setSyncing(true);
+    setApiError("");
+    setFileMessage("");
+    try {
+      await syncPublicReservations(sessionId);
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Public reservation sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleFileImport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setApiError("");
+    setFileMessage("");
+    try {
+      const text = await file.text();
+      const reservations = file.name.toLowerCase().endsWith(".csv")
+        ? parseReservationCsv(text)
+        : parseReservationJson(text);
+      importPublicReservationsSnapshot(sessionId, reservations);
+      setFileMessage(`${reservations.length} reservations imported from local file.`);
+    } catch (error) {
+      setFileMessage(error instanceof Error ? error.message : "Failed to import reservation file.");
+    }
+  }
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = window.setInterval(() => {
+      void handlePublicSync();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, sessionId]);
+
   return (
     <section className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <Button onClick={() => setSearchOpen((value) => !value)}>
-        {t.importFromClubX}
+      <div className="grid gap-3 rounded-2xl border border-club-green/30 bg-white p-4">
+        <div>
+          <p className="text-xs font-black uppercase text-club-green">Public reservations</p>
+          <p className="mt-1 break-all text-xs font-bold text-slate-500">{getApiBase()}</p>
+        </div>
+        <Button disabled={syncing} icon={<RefreshCcw size={17} />} onClick={handlePublicSync}>
+          {syncing ? "동기화 중..." : "공개 예약 동기화"}
+        </Button>
+        <input
+          accept=".json,.csv,application/json,text/csv"
+          className="hidden"
+          onChange={handleFileImport}
+          ref={fileInputRef}
+          type="file"
+        />
+        <Button
+          icon={<FileJson size={17} />}
+          onClick={() => fileInputRef.current?.click()}
+          variant="secondary"
+        >
+          예약 JSON/CSV 가져오기
+        </Button>
+        <label className="flex items-center gap-2 text-xs font-black text-slate-600">
+          <input
+            checked={autoRefresh}
+            onChange={(event) => setAutoRefresh(event.target.checked)}
+            type="checkbox"
+          />
+          10초 자동 새로고침
+        </label>
+        {source?.id === "public-pub-reservations" ? (
+          <div className="rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">
+            <p>마지막 동기화: {formatDateTime(source.importedAt)}</p>
+            <p>가져온 예약 수: {source.reservationCount}</p>
+          </div>
+        ) : null}
+        {apiError || source?.errorMessage ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+            {apiError || source?.errorMessage}
+          </div>
+        ) : null}
+        {fileMessage ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-600">
+            {fileMessage}
+          </div>
+        ) : null}
+      </div>
+
+      <Button onClick={() => setSearchOpen((value) => !value)} variant="secondary">
+        {t.importFromClubX} (dev)
       </Button>
 
       {source ? (
@@ -386,7 +486,12 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
                   const allChecked = card.guests.length > 0 && card.guests.every((guest) => guest.checkedIn);
                   const partialChecked = card.guests.some((guest) => guest.checkedIn) && !allChecked;
                   const selected = selectedPartyCardId === card.id;
-                  const assignable = card.status === "waiting" || card.status === "overdue";
+                  const inactiveUpstream = Boolean(
+                    card.upstreamStatus &&
+                      ["cancelled", "deleted", "hidden", "missing"].includes(card.upstreamStatus),
+                  );
+                  const assignable =
+                    !inactiveUpstream && (card.status === "waiting" || card.status === "overdue");
 
                   return (
                     <article
@@ -421,6 +526,11 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
                           <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-club-ink">
                             {partyCardStatusText(card, allChecked, t)}
                           </span>
+                          {inactiveUpstream ? (
+                            <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-black text-red-700">
+                              API {card.upstreamStatus}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 
@@ -663,4 +773,163 @@ function PlaceholderPanel({
       <div className="text-sm font-semibold text-slate-600">{children}</div>
     </section>
   );
+}
+
+function parseReservationJson(text: string): AdminReservation[] {
+  const parsed = JSON.parse(text) as unknown;
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "object" && parsed !== null && "data" in parsed
+      ? (parsed as { data?: unknown }).data
+      : typeof parsed === "object" && parsed !== null && "reservations" in parsed
+        ? (parsed as { reservations?: unknown }).reservations
+        : null;
+
+  if (!Array.isArray(list)) {
+    throw new Error("JSON must be an array or contain data/reservations array.");
+  }
+
+  return list.map((item, index) => normalizeImportedReservation(item, index));
+}
+
+function parseReservationCsv(text: string): AdminReservation[] {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).filter((row) => row.some(Boolean)).map((row, index) => {
+    const record = Object.fromEntries(headers.map((header, column) => [header, row[column] ?? ""]));
+    return normalizeImportedReservation(record, index);
+  });
+}
+
+function parseCsvRows(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    cell += char;
+  }
+
+  if (cell || row.length) {
+    row.push(cell.trim());
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function normalizeImportedReservation(raw: unknown, index: number): AdminReservation {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`Invalid reservation row at index ${index + 1}.`);
+  }
+  const record = raw as Record<string, unknown>;
+  const id = textField(record, "id") || textField(record, "reservation_id") || `local-${index + 1}`;
+  const startLabel = textField(record, "start_label") || minuteToLabel(numberField(record, "start_minute"));
+  const endLabel = textField(record, "end_label") || minuteToLabel(numberField(record, "end_minute"));
+  const guests = parseImportedGuests(record, id);
+
+  return {
+    id,
+    reservation_code:
+      textField(record, "reservation_code") ||
+      textField(record, "reservation_number") ||
+      textField(record, "code") ||
+      `LOCAL-${String(index + 1).padStart(3, "0")}`,
+    status: textField(record, "status") || "confirmed",
+    event_id: textField(record, "event_id") || "local-file",
+    service_date: textField(record, "service_date") || new Date().toISOString().slice(0, 10),
+    start_minute: numberField(record, "start_minute"),
+    end_minute: numberField(record, "end_minute"),
+    start_label: startLabel,
+    end_label: endLabel,
+    total_party_size: numberField(record, "total_party_size") || guests.length || 1,
+    table_count: Math.max(1, numberField(record, "table_count") || 1),
+    contact_name: textField(record, "contact_name") || guests[0]?.name || "-",
+    contact_phone: textField(record, "contact_phone") || textField(record, "phone") || null,
+    contact_phone_masked: textField(record, "contact_phone_masked") || null,
+    created_at: textField(record, "created_at") || new Date().toISOString(),
+    guests,
+  };
+}
+
+function parseImportedGuests(record: Record<string, unknown>, reservationId: string) {
+  if (Array.isArray(record.guests)) {
+    return record.guests.map((guest, index) => {
+      const item = typeof guest === "object" && guest !== null ? guest as Record<string, unknown> : {};
+      return {
+        id: textField(item, "id") || `${reservationId}:guest:${index}`,
+        name: textField(item, "name") || `Guest ${index + 1}`,
+        phone: textField(item, "phone") || null,
+        phone_masked: textField(item, "phone_masked") || null,
+        username: textField(item, "username") || textField(item, "clubx_username") || null,
+      };
+    });
+  }
+
+  const names = splitList(textField(record, "guest_names") || textField(record, "names"));
+  const phones = splitList(textField(record, "guest_phones") || textField(record, "phones"));
+  if (names.length) {
+    return names.map((name, index) => ({
+      id: `${reservationId}:guest:${index}`,
+      name,
+      phone: phones[index] ?? null,
+      phone_masked: null,
+    }));
+  }
+
+  const contactName = textField(record, "contact_name") || textField(record, "name");
+  if (!contactName) return [];
+  return [{
+    id: `${reservationId}:contact`,
+    name: contactName,
+    phone: textField(record, "contact_phone") || textField(record, "phone") || null,
+    phone_masked: textField(record, "contact_phone_masked") || null,
+  }];
+}
+
+function textField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : value === null || value === undefined ? "" : String(value).trim();
+}
+
+function numberField(record: Record<string, unknown>, key: string) {
+  const value = Number(record[key] ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function splitList(value: string) {
+  return value.split(/[;|]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function minuteToLabel(minute: number) {
+  if (!minute) return "00:00";
+  const hour = Math.floor(minute / 60);
+  const min = minute % 60;
+  return `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }

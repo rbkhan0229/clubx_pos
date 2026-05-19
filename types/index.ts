@@ -84,6 +84,7 @@ export type PartyCard = {
   status: "waiting" | "seated" | "completed" | "overdue";
   sourceId?: string;
   mappedTableIds?: string[];
+  upstreamStatus?: string;
 };
 
 export type ReservationSource = {
@@ -94,6 +95,8 @@ export type ReservationSource = {
   date: string;
   importedAt: string;
   reservationCount: number;
+  syncStatus?: "idle" | "success" | "error";
+  errorMessage?: string;
 };
 
 export type WaitingSite = {
