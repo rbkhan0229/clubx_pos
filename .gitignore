@@ -8,3 +8,4 @@ data/*.json
 data/*.csv
 *.reservation-export.json
 *.reservation-export.csv
+.vercel
