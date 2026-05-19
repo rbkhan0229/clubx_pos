@@ -2,7 +2,16 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownAZ, ArrowUpAZ, LogOut, Plus } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  CalendarCheck2,
+  LayoutDashboard,
+  LogOut,
+  Plus,
+  Settings,
+  Users,
+} from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
@@ -78,6 +87,34 @@ export function DashboardClient() {
         <div className="flex flex-wrap gap-3">
           <Button icon={<Plus size={19} />} onClick={() => setModalOpen(true)}>
             {t.createSession}
+          </Button>
+          <Button
+            icon={<LayoutDashboard size={18} />}
+            onClick={() => router.push("/counter/admin")}
+            variant="secondary"
+          >
+            운영 대시보드
+          </Button>
+          <Button
+            icon={<CalendarCheck2 size={18} />}
+            onClick={() => router.push("/counter/reservations")}
+            variant="secondary"
+          >
+            공개 예약
+          </Button>
+          <Button
+            icon={<Users size={18} />}
+            onClick={() => router.push("/counter/waitlist")}
+            variant="secondary"
+          >
+            현장 대기
+          </Button>
+          <Button
+            icon={<Settings size={18} />}
+            onClick={() => router.push("/counter/settings")}
+            variant="secondary"
+          >
+            설정
           </Button>
           <Button
             icon={<LogOut size={18} />}
