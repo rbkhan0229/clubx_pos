@@ -97,10 +97,24 @@ function addMinutes(value: string, minutes: number) {
 function reservationDateTime(time?: string) {
   const now = new Date();
   if (!time) return now.toISOString();
-  const [hour = "0", minute = "0"] = time.split(":");
+  const startTime = time.split("-")[0]?.trim() || time;
+  const [hour = "0", minute = "0"] = startTime.split(":");
+  const parsedHour = Number(hour);
+  const parsedMinute = Number(minute);
+  if (!Number.isFinite(parsedHour) || !Number.isFinite(parsedMinute)) return now.toISOString();
   const next = new Date(now);
-  next.setHours(Number(hour), Number(minute), 0, 0);
+  next.setHours(parsedHour, parsedMinute, 0, 0);
+  if (Number.isNaN(next.getTime())) return now.toISOString();
   return next.toISOString();
+}
+
+function reservationTimestamp(time?: string) {
+  try {
+    const timestamp = new Date(reservationDateTime(time)).getTime();
+    return Number.isFinite(timestamp) ? timestamp : Date.now();
+  } catch {
+    return Date.now();
+  }
 }
 
 export const useVisitStore = create<VisitState>((set, get) => ({
@@ -269,7 +283,7 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       if (card.type !== "reservation" || card.status === "seated" || card.status === "completed") {
         return card;
       }
-      const reservationAt = new Date(reservationDateTime(card.reservationTime)).getTime();
+      const reservationAt = reservationTimestamp(card.reservationTime);
       if (reservationAt < now && card.status !== "overdue") {
         changed = true;
         return { ...card, status: "overdue" as const };

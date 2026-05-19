@@ -1,4 +1,5 @@
 const DEFAULT_API_BASE = "https://club-lms-for-kuba-production.up.railway.app/api/v1";
+const BROWSER_PROXY_API_BASE = "/api/clubx";
 const TOKEN_KEY = "clubx_admin_token";
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -17,7 +18,9 @@ export class ApiError extends Error {
 
 export function getApiBase() {
   const configured = process.env.NEXT_PUBLIC_CLUBX_API_BASE?.trim();
-  return (configured || DEFAULT_API_BASE).replace(/\/+$/, "");
+  if (configured) return configured.replace(/\/+$/, "");
+  if (typeof window !== "undefined") return BROWSER_PROXY_API_BASE;
+  return DEFAULT_API_BASE;
 }
 
 export function getAdminToken() {
@@ -26,7 +29,12 @@ export function getAdminToken() {
 }
 
 function buildUrl(path: string, query?: Record<string, QueryValue>) {
-  const url = new URL(`${getApiBase()}${path.startsWith("/") ? path : `/${path}`}`);
+  const base = getApiBase();
+  const joined = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const url =
+    base.startsWith("http")
+      ? new URL(joined)
+      : new URL(joined, typeof window !== "undefined" ? window.location.origin : DEFAULT_API_BASE);
   if (query) {
     Object.entries(query).forEach(([key, value]) => {
       if (value === null || value === undefined || value === "") return;

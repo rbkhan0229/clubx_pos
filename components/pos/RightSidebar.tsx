@@ -209,11 +209,11 @@ function ReservationSourcePanel({ sessionId }: { sessionId: string }) {
     <section className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="grid gap-3 rounded-2xl border border-club-green/30 bg-white p-4">
         <div>
-          <p className="text-xs font-black uppercase text-club-green">Public reservations</p>
+          <p className="text-xs font-black uppercase text-club-green">ClubX reservation JSON</p>
           <p className="mt-1 break-all text-xs font-bold text-slate-500">{getApiBase()}</p>
         </div>
         <Button disabled={syncing} icon={<RefreshCcw size={17} />} onClick={handlePublicSync}>
-          {syncing ? "동기화 중..." : "공개 예약 동기화"}
+          {syncing ? "불러오는 중..." : "ClubX 예약 JSON 불러오기"}
         </Button>
         <input
           accept=".json,.csv,application/json,text/csv"
@@ -227,7 +227,7 @@ function ReservationSourcePanel({ sessionId }: { sessionId: string }) {
           onClick={() => fileInputRef.current?.click()}
           variant="secondary"
         >
-          예약 JSON/CSV 가져오기
+          로컬 JSON/CSV 가져오기
         </Button>
         <label className="flex items-center gap-2 text-xs font-black text-slate-600">
           <input
