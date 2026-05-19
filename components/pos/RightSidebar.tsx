@@ -9,15 +9,19 @@ import {
   ExternalLink,
   FileJson,
   Hourglass,
+  Printer,
   RefreshCcw,
+  ReceiptText,
   Smartphone,
   UploadCloud,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api/client";
+import { posClient } from "@/lib/api/posClient";
 import type { AdminReservation } from "@/lib/api/types";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { subscribeClubxSync } from "@/lib/localSync";
 import { mockClubXEvents } from "@/lib/mock/reservations";
+import { getPosRepositoryMode } from "@/lib/pos/repositories";
 import { useAppStore } from "@/stores/useAppStore";
 import { useHandyStore } from "@/stores/useHandyStore";
 import { useReservationStore } from "@/stores/useReservationStore";
@@ -29,10 +33,12 @@ import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
 import type { PartyCard, StaffDevice, Table, WaitingSite } from "@/types";
 import type { SidebarTab } from "@/types";
+import type { PosOrderDto } from "@/types/posApi";
 
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
 const EMPTY_WAITING_SITES: WaitingSite[] = [];
 const EMPTY_TABLES: Table[] = [];
+const REQUEST_ITEM_PREFIX = "__REQ__:";
 
 const tabs: Array<{
   id: SidebarTab;
@@ -63,6 +69,12 @@ const tabs: Array<{
     labelKey: "handyOrderDeviceManagement",
     shortLabel: "H",
     icon: <Smartphone size={17} />,
+  },
+  {
+    id: "mobileOrders",
+    labelKey: "orderDashboard",
+    shortLabel: "M",
+    icon: <ReceiptText size={17} />,
   },
 ];
 
@@ -126,8 +138,153 @@ function SidebarContent({ activeTab, sessionId }: { activeTab: SidebarTab; sessi
     return <ReservationSourcePanel sessionId={sessionId} />;
   }
 
+  if (activeTab === "mobileOrders") {
+    return <MobileOrdersPanel sessionId={sessionId} />;
+  }
+
   return (
     <HandyDevicePanel sessionId={sessionId} />
+  );
+}
+
+function MobileOrdersPanel({ sessionId }: { sessionId: string }) {
+  const [orders, setOrders] = useState<PosOrderDto[]>([]);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [seenOrderIds, setSeenOrderIds] = useState<Set<string>>(new Set());
+  const [lastLoadedAt, setLastLoadedAt] = useState("");
+  const [error, setError] = useState("");
+  const mode = getPosRepositoryMode();
+  const mobileOrders = orders
+    .filter((order) => order.source === "mobile_qr" || order.order_type === "qrFallback")
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  async function loadMobileOrders(markSeen = false) {
+    if (mode !== "server") return;
+    try {
+      const nextOrders = await posClient.listPosOrders(sessionId);
+      setOrders(nextOrders);
+      setLastLoadedAt(new Date().toISOString());
+      setError("");
+      if (markSeen) {
+        setSeenOrderIds(new Set(nextOrders.map((order) => order.id)));
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "모바일 주문을 불러오지 못했습니다.");
+    }
+  }
+
+  useEffect(() => {
+    void loadMobileOrders(true);
+    if (mode !== "server") return;
+    const timer = window.setInterval(() => {
+      void loadMobileOrders(false);
+    }, 3_000);
+    return () => window.clearInterval(timer);
+  }, [mode, sessionId]);
+
+  function openPrint(order: PosOrderDto) {
+    const url = `/print/order/${order.id}?sessionId=${encodeURIComponent(sessionId)}&visitId=${encodeURIComponent(order.visit_id)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setSeenOrderIds((current) => new Set([...current, order.id]));
+  }
+
+  if (mode !== "server") {
+    return (
+      <PlaceholderPanel>
+        모바일 주문은 server mode에서 ClubX POS API를 통해 표시됩니다. localStorage POS 기능은 그대로 유지됩니다.
+      </PlaceholderPanel>
+    );
+  }
+
+  return (
+    <section className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-club-green">Mobile Orders</p>
+          <h3 className="text-xl font-black">모바일 주문</h3>
+          {lastLoadedAt ? (
+            <p className="mt-1 text-xs font-bold text-slate-500">
+              마지막 확인: {formatDateTime(lastLoadedAt)}
+            </p>
+          ) : null}
+        </div>
+        <Button className="min-h-0 px-3 py-2" onClick={() => loadMobileOrders(true)} variant="secondary">
+          새로고침
+        </Button>
+      </div>
+
+      {error ? (
+        <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-black text-red-700">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="grid gap-2">
+        {mobileOrders.length === 0 ? (
+          <p className="rounded-xl bg-white p-4 text-center text-sm font-bold text-slate-500">
+            아직 모바일 주문이 없습니다.
+          </p>
+        ) : (
+          mobileOrders.map((order) => {
+            const isNew = !seenOrderIds.has(order.id);
+            const expanded = expandedOrderId === order.id;
+            const requestText = getMobileOrderRequest(order);
+            const visibleItems = getVisibleOrderItems(order);
+            return (
+              <article
+                className={`rounded-2xl border p-3 ${
+                  isNew ? "border-club-green bg-lime-50" : "border-slate-200 bg-white"
+                }`}
+                key={order.id}
+              >
+                <button
+                  className="w-full text-left"
+                  onClick={() => {
+                    setExpandedOrderId(expanded ? null : order.id);
+                    setSeenOrderIds((current) => new Set([...current, order.id]));
+                  }}
+                  type="button"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-black">#{order.order_number}</p>
+                      <p className="text-xs font-bold text-slate-500">{formatDateTime(order.created_at)}</p>
+                    </div>
+                    {isNew ? (
+                      <span className="rounded-full bg-club-acid px-3 py-1 text-xs font-black">
+                        NEW
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-sm font-black text-slate-700">
+                    {visibleItems.map((item) => `${item.menu_name} x${item.quantity}`).join(", ")}
+                  </p>
+                </button>
+
+                {expanded ? (
+                  <div className="mt-3 grid gap-3 border-t border-slate-200 pt-3">
+                    <div className="grid gap-2">
+                      {visibleItems.map((item) => (
+                        <div className="flex justify-between gap-3 text-sm font-black" key={item.id}>
+                          <span>{item.menu_name}</span>
+                          <span>x{item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-600">
+                      요청사항: {requestText || "없음"}
+                    </div>
+                    <Button icon={<Printer size={16} />} onClick={() => openPrint(order)}>
+                      주문서 프린트
+                    </Button>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -724,6 +881,19 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function getMobileOrderRequest(order: PosOrderDto) {
+  return (
+    order.items
+      .find((item) => item.menu_name.startsWith(REQUEST_ITEM_PREFIX))
+      ?.menu_name.slice(REQUEST_ITEM_PREFIX.length)
+      .trim() ?? ""
+  );
+}
+
+function getVisibleOrderItems(order: PosOrderDto) {
+  return order.items.filter((item) => !item.menu_name.startsWith(REQUEST_ITEM_PREFIX));
 }
 
 function waitingSlot(index: number) {

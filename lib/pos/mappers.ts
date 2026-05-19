@@ -95,7 +95,7 @@ export function mapPosOrderDtoToOrder(dto: PosOrderDto): Order {
 function mapPosOrderItemDtoToOrderItem(item: PosOrderDto["items"][number]): OrderItem {
   return {
     id: item.id,
-    menuItemId: item.menu_item_id,
+    menuItemId: item.menu_item_id ?? `custom:${item.menu_name}`,
     // Snapshot fields are intentionally copied from the order item, not the live menu.
     menuName: item.menu_name,
     unitPrice: item.unit_price,

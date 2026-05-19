@@ -217,7 +217,7 @@ export type PosVisitUpdateDto = Partial<{
 
 export type PosOrderItemDto = {
   id: string;
-  menu_item_id: string;
+  menu_item_id?: string | null;
   menu_name: string;
   unit_price: number;
   quantity: number;
