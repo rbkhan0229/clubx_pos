@@ -90,13 +90,13 @@ export const localPosRepositories: PosRepositories = {
           id: sessionId,
           name: payload.name ?? sessionId,
           createdAt: nowIso(),
-          lastAccessedAt: payload.last_accessed_at ?? null,
+          lastAccessedAt: null,
         };
       } else {
         nextSession = {
           ...nextSession,
           name: payload.name ?? nextSession.name,
-          lastAccessedAt: payload.last_accessed_at ?? nextSession.lastAccessedAt,
+          lastAccessedAt: nextSession.lastAccessedAt,
         };
       }
       writeSessions([nextSession, ...readSessions().filter((session) => session.id !== sessionId)]);
@@ -140,13 +140,21 @@ export const localPosRepositories: PosRepositories = {
           ...table,
           number: payload.number ?? table.number,
           status: payload.status === "occupied" || payload.status === "cleaning" ? payload.status : table.status,
-          size: payload.size === 1 || payload.size === 2 || payload.size === 3 ? payload.size : table.size,
+          size:
+            payload.visual_size === 1 || payload.visual_size === 2 || payload.visual_size === 3
+              ? payload.visual_size
+              : table.size,
           minCapacity: payload.min_capacity ?? table.minCapacity,
           maxCapacity: payload.max_capacity ?? table.maxCapacity,
           x: payload.x ?? table.x,
           y: payload.y ?? table.y,
-          mergedGroupId: payload.merge_group_id ?? table.mergedGroupId,
-          originalPosition: payload.original_position ?? table.originalPosition,
+          mergedGroupId: payload.merged_group_id ?? table.mergedGroupId,
+          originalPosition:
+            payload.original_x !== undefined && payload.original_y !== undefined
+              ? payload.original_x === null || payload.original_y === null
+                ? undefined
+                : { x: payload.original_x, y: payload.original_y }
+              : table.originalPosition,
         };
         return updated;
       });
@@ -174,8 +182,8 @@ export const localPosRepositories: PosRepositories = {
         id: `merge-${sessionId}-${Date.now()}`,
         sessionId,
         tableIds: payload.table_ids,
-        label: payload.label ?? payload.table_ids.join("+"),
-        originalPositions: payload.original_positions ?? {},
+        label: payload.label,
+        originalPositions: {},
         createdAt: nowIso(),
       };
       const groups = readLocalJson<TableMergeGroup[]>(localKeys.mergeGroups(sessionId), []);
@@ -235,13 +243,13 @@ export const localPosRepositories: PosRepositories = {
           checkedIn: guest.checked_in,
         })),
         guestCount: payload.guest_count ?? undefined,
-        tableCount: payload.table_count,
+        tableCount: payload.table_count ?? 1,
         status:
           payload.status === "seated" || payload.status === "completed" || payload.status === "overdue"
             ? payload.status
             : "waiting",
         sourceId: payload.source_id ?? undefined,
-        mappedTableIds: payload.mapped_table_ids ?? [],
+        mappedTableIds: [],
         upstreamStatus: payload.upstream_status ?? undefined,
       };
       writeLocalJson(localKeys.partyCards(sessionId), [...readLocalJson<PartyCard[]>(localKeys.partyCards(sessionId), []), card]);
@@ -258,7 +266,6 @@ export const localPosRepositories: PosRepositories = {
           ...card,
           code: payload.code ?? card.code,
           tableCount: payload.table_count ?? card.tableCount,
-          mappedTableIds: payload.mapped_table_ids ?? card.mappedTableIds,
           upstreamStatus: payload.upstream_status ?? card.upstreamStatus,
         };
         return updated;
@@ -283,10 +290,10 @@ export const localPosRepositories: PosRepositories = {
           payload.source_type === "waiting" || payload.source_type === "walkIn" || payload.source_type === "joined"
             ? payload.source_type
             : "reservation",
-        sourceId: payload.source_id ?? undefined,
+        sourceId: undefined,
         visitCode: payload.visit_code,
         startedAt: payload.started_at ?? nowIso(),
-        expectedEndAt: payload.expected_end_at,
+        expectedEndAt: payload.expected_end_at ?? nowIso(),
         status: payload.status === "paid" || payload.status === "cleaning" || payload.status === "completed" ? payload.status : "active",
         isJoined: payload.is_joined,
         joinedAt: payload.joined_at ?? undefined,
@@ -303,8 +310,6 @@ export const localPosRepositories: PosRepositories = {
         if (visit.id !== visitId) return visit;
         updated = {
           ...visit,
-          tableIds: payload.table_ids ?? visit.tableIds,
-          partyCardIds: payload.party_card_ids ?? visit.partyCardIds,
           expectedEndAt: payload.expected_end_at ?? visit.expectedEndAt,
           status: payload.status === "paid" || payload.status === "cleaning" || payload.status === "completed" ? payload.status : visit.status,
         };
@@ -326,7 +331,7 @@ export const localPosRepositories: PosRepositories = {
         id: `order-${sessionId}-${Date.now()}`,
         sessionId,
         visitId: payload.visit_id,
-        segmentId: payload.segment_id ?? undefined,
+        segmentId: undefined,
         orderNumber: current.length + 1,
         orderedBy: {
           type: payload.ordered_by_type === "handy" ? "handy" : "counter",
@@ -356,7 +361,7 @@ export const localPosRepositories: PosRepositories = {
       let updated: Order | undefined;
       const next = readLocalJson<Order[]>(localKeys.orders(sessionId), []).map((order) => {
         if (order.id !== orderId) return order;
-        updated = { ...order, segmentId: payload.segment_id ?? order.segmentId, updatedAt: nowIso() };
+        updated = { ...order, updatedAt: nowIso() };
         return updated;
       });
       writeLocalJson(localKeys.orders(sessionId), next);
@@ -375,7 +380,7 @@ export const localPosRepositories: PosRepositories = {
         sessionId,
         visitId: payload.visit_id,
         tableLabel: payload.table_label,
-        segmentId: payload.segment_id ?? undefined,
+        segmentId: undefined,
         paidAt: nowIso(),
         items: payload.items.map((item) => ({
           menuItemId: item.menu_item_id ?? undefined,
@@ -443,11 +448,10 @@ export const localPosRepositories: PosRepositories = {
         id: `qr-${sessionId}-${Date.now()}`,
         session_id: sessionId,
         visit_id: payload.visit_id,
-        table_id: payload.table_id,
+        order_id: payload.order_id,
         idempotency_key: payload.idempotency_key,
-        staff_name: payload.staff_name,
-        items: payload.items,
-        created_at: nowIso(),
+        payload_json: payload.payload_json,
+        registered_at: nowIso(),
       };
       broadcastLocalRepositorySync("orders", sessionId);
       return registration;

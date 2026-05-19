@@ -35,7 +35,7 @@ function mapMergeGroupDto(dto: PosTableMergeGroupDto): TableMergeGroup {
     sessionId: dto.session_id,
     tableIds: dto.table_ids,
     label: dto.label,
-    originalPositions: dto.original_positions,
+    originalPositions: {},
     createdAt: dto.created_at,
   };
 }
@@ -165,7 +165,12 @@ export const serverPosRepositories: PosRepositories = {
   },
   qrFallback: {
     async createRegistration(sessionId, payload) {
-      return posClient.createPosQrOrderRegistration(sessionId, payload);
+      return posClient.createPosQrOrderRegistration(sessionId, {
+        visit_id: payload.visit_id,
+        order_id: payload.order_id,
+        idempotency_key: payload.idempotency_key,
+        payload_json: payload.payload_json,
+      });
     },
     async listRegisteredKeys(_sessionId) {
       // TODO Phase 13C-8: add backend list endpoint if operators need idempotency-key inspection.

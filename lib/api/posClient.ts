@@ -34,7 +34,7 @@ export const posClient = {
   getPosSession: (sessionId: string) =>
     api.get<PosBusinessSessionDto>(`${POS_BASE}/sessions/${sessionId}`),
   updatePosSession: (sessionId: string, payload: PosBusinessSessionUpdateDto) =>
-    api.post<PosBusinessSessionDto>(`${POS_BASE}/sessions/${sessionId}`, payload),
+    api.patch<PosBusinessSessionDto>(`${POS_BASE}/sessions/${sessionId}`, payload),
   closePosSession: (sessionId: string) =>
     api.post<PosBusinessSessionDto>(`${POS_BASE}/sessions/${sessionId}/close`),
 
@@ -43,7 +43,7 @@ export const posClient = {
   createPosTable: (sessionId: string, payload: PosTableCreateDto) =>
     api.post<PosTableDto>(`${POS_BASE}/sessions/${sessionId}/tables`, payload),
   updatePosTable: (tableId: string, payload: PosTableUpdateDto) =>
-    api.post<PosTableDto>(`${POS_BASE}/tables/${tableId}`, payload),
+    api.patch<PosTableDto>(`${POS_BASE}/tables/${tableId}`, payload),
   deletePosTable: (tableId: string) => api.delete<{ ok: boolean }>(`${POS_BASE}/tables/${tableId}`),
 
   listPosMergeGroups: (sessionId: string) =>
@@ -51,28 +51,28 @@ export const posClient = {
   createPosMergeGroup: (sessionId: string, payload: PosTableMergeGroupCreateDto) =>
     api.post<PosTableMergeGroupDto>(`${POS_BASE}/sessions/${sessionId}/merge-groups`, payload),
   splitPosMergeGroup: (groupId: string) =>
-    api.post<{ ok: boolean }>(`${POS_BASE}/merge-groups/${groupId}/split`),
+    api.post<PosTableMergeGroupDto>(`${POS_BASE}/merge-groups/${groupId}/split`),
 
   listPosPartyCards: (sessionId: string) =>
     api.get<PosPartyCardDto[]>(`${POS_BASE}/sessions/${sessionId}/party-cards`),
   createPosPartyCard: (sessionId: string, payload: PosPartyCardCreateDto) =>
     api.post<PosPartyCardDto>(`${POS_BASE}/sessions/${sessionId}/party-cards`, payload),
   updatePosPartyCard: (partyCardId: string, payload: PosPartyCardUpdateDto) =>
-    api.post<PosPartyCardDto>(`${POS_BASE}/party-cards/${partyCardId}`, payload),
+    api.patch<PosPartyCardDto>(`${POS_BASE}/party-cards/${partyCardId}`, payload),
 
   listPosVisits: (sessionId: string) =>
     api.get<PosVisitDto[]>(`${POS_BASE}/sessions/${sessionId}/visits`),
   createPosVisit: (sessionId: string, payload: PosVisitCreateDto) =>
     api.post<PosVisitDto>(`${POS_BASE}/sessions/${sessionId}/visits`, payload),
   updatePosVisit: (visitId: string, payload: PosVisitUpdateDto) =>
-    api.post<PosVisitDto>(`${POS_BASE}/visits/${visitId}`, payload),
+    api.patch<PosVisitDto>(`${POS_BASE}/visits/${visitId}`, payload),
 
   listPosOrders: (sessionId: string) =>
     api.get<PosOrderDto[]>(`${POS_BASE}/sessions/${sessionId}/orders`),
   createPosOrder: (sessionId: string, payload: PosOrderCreateDto) =>
     api.post<PosOrderDto>(`${POS_BASE}/sessions/${sessionId}/orders`, payload),
   updatePosOrder: (orderId: string, payload: PosOrderUpdateDto) =>
-    api.post<PosOrderDto>(`${POS_BASE}/orders/${orderId}`, payload),
+    api.patch<PosOrderDto>(`${POS_BASE}/orders/${orderId}`, payload),
 
   listPosPayments: (sessionId: string) =>
     api.get<PosPaymentDto[]>(`${POS_BASE}/sessions/${sessionId}/payments`),
@@ -88,7 +88,7 @@ export const posClient = {
   createPosDevice: (sessionId: string, payload: PosStaffDeviceCreateDto) =>
     api.post<PosStaffDeviceDto>(`${POS_BASE}/sessions/${sessionId}/devices`, payload),
   deletePosDevice: (deviceId: string) =>
-    api.delete<{ ok: boolean }>(`${POS_BASE}/devices/${deviceId}`),
+    api.post<PosStaffDeviceDto>(`${POS_BASE}/devices/${deviceId}/delete`),
 
   createPosQrOrderRegistration: (
     sessionId: string,

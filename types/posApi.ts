@@ -8,34 +8,41 @@ import type {
   PaymentItem,
   StaffDevice,
   Table,
-  TableMergeGroup,
   TimeAdjustmentLog,
   Visit,
   WaitingSite,
 } from "@/types";
 
-export type PosBusinessSessionStatus = "open" | "closed";
+export type PosBusinessSessionStatus = "active" | "closed" | "archived";
 
 export type PosBusinessSessionDto = {
   id: string;
   name: string;
-  status: PosBusinessSessionStatus | string;
+  status: PosBusinessSessionStatus;
   opened_at: string;
   closed_at?: string | null;
+  created_by_user_id?: string | null;
+  source_event_id?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
   last_accessed_at?: string | null;
   metadata?: Record<string, unknown> | null;
 };
 
 export type PosBusinessSessionCreateDto = {
   name: string;
-  metadata?: Record<string, unknown>;
+  opened_at?: string;
+  created_by_user_id?: string | null;
+  source_event_id?: string | null;
+  notes?: string | null;
 };
 
 export type PosBusinessSessionUpdateDto = Partial<{
   name: string;
-  status: PosBusinessSessionStatus | string;
-  last_accessed_at: string | null;
-  metadata: Record<string, unknown>;
+  status: PosBusinessSessionStatus;
+  closed_at: string | null;
+  notes: string | null;
 }>;
 
 export type PosTableDto = {
@@ -43,51 +50,56 @@ export type PosTableDto = {
   session_id: string;
   number: string;
   status: Table["status"] | string;
-  size: Table["size"] | number;
   min_capacity: number;
   max_capacity: number;
+  visual_size: Table["size"] | number;
   x: number;
   y: number;
-  merge_group_id?: string | null;
-  original_position?: Table["originalPosition"] | null;
-  created_at?: string;
-  updated_at?: string;
+  merged_group_id?: string | null;
+  original_x?: number | null;
+  original_y?: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PosTableCreateDto = {
-  number?: string;
+  number: string;
+  status?: Table["status"] | string;
   min_capacity: number;
   max_capacity: number;
+  visual_size: Table["size"] | number;
   x: number;
   y: number;
-  size?: Table["size"] | number;
+  original_x?: number | null;
+  original_y?: number | null;
 };
 
 export type PosTableUpdateDto = Partial<{
   number: string;
   status: Table["status"] | string;
-  size: Table["size"] | number;
   min_capacity: number;
   max_capacity: number;
+  visual_size: Table["size"] | number;
   x: number;
   y: number;
-  merge_group_id: string | null;
-  original_position: Table["originalPosition"] | null;
+  merged_group_id: string | null;
+  original_x: number | null;
+  original_y: number | null;
 }>;
 
 export type PosTableMergeGroupDto = {
   id: string;
   session_id: string;
-  table_ids: string[];
   label: string;
-  original_positions: TableMergeGroup["originalPositions"];
+  status: string;
   created_at: string;
+  table_ids: string[];
 };
 
 export type PosTableMergeGroupCreateDto = {
+  label: string;
+  status?: string;
   table_ids: string[];
-  label?: string;
-  original_positions?: TableMergeGroup["originalPositions"];
 };
 
 export type PosMenuCategoryDto = {
@@ -123,7 +135,7 @@ export type PosMenuItemCreateDto = {
 };
 
 export type PosPartyCardGuestDto = {
-  id: string;
+  id?: string;
   name: string;
   phone?: string | null;
   username?: string | null;
@@ -135,66 +147,73 @@ export type PosPartyCardDto = {
   session_id: string;
   type: PartyCard["type"] | string;
   code: string;
+  status: PartyCard["status"] | string;
   reservation_time?: string | null;
   waiting_order?: number | null;
-  guests: PosPartyCardGuestDto[];
   guest_count?: number | null;
   table_count: number;
-  status: PartyCard["status"] | string;
-  source_id?: string | null;
   source_type?: string | null;
-  mapped_table_ids?: string[];
+  source_id?: string | null;
   upstream_status?: string | null;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
+  guests?: PosPartyCardGuestDto[];
+  mapped_table_ids?: string[];
 };
 
 export type PosPartyCardCreateDto = {
   type: PartyCard["type"] | string;
   code: string;
+  status?: PartyCard["status"] | string;
   reservation_time?: string | null;
   waiting_order?: number | null;
-  guests?: Array<Omit<PosPartyCardGuestDto, "id"> & { id?: string }>;
-  guest_count?: number | null;
-  table_count: number;
-  status?: PartyCard["status"] | string;
-  source_id?: string | null;
+  guest_count?: number;
+  table_count?: number;
   source_type?: string | null;
-  mapped_table_ids?: string[];
+  source_id?: string | null;
   upstream_status?: string | null;
+  guests?: PosPartyCardGuestDto[];
 };
 
-export type PosPartyCardUpdateDto = Partial<PosPartyCardCreateDto>;
+export type PosPartyCardUpdateDto = Partial<Omit<PosPartyCardCreateDto, "guests">>;
 
 export type PosVisitDto = {
   id: string;
   session_id: string;
-  table_ids: string[];
-  party_card_ids: string[];
-  source_type: Visit["sourceType"] | string;
-  source_id?: string | null;
   visit_code: string;
+  source_type: Visit["sourceType"] | string;
+  status: Visit["status"] | string;
   started_at: string;
   expected_end_at: string;
-  status: Visit["status"] | string;
+  completed_at?: string | null;
   is_joined?: boolean;
   joined_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  table_ids?: string[];
+  party_card_ids?: string[];
 };
 
 export type PosVisitCreateDto = {
-  table_ids: string[];
-  party_card_ids: string[];
-  source_type: Visit["sourceType"] | string;
-  source_id?: string | null;
   visit_code: string;
-  started_at?: string;
-  expected_end_at: string;
+  source_type: Visit["sourceType"] | string;
   status?: Visit["status"] | string;
+  started_at?: string;
+  expected_end_at?: string;
   is_joined?: boolean;
   joined_at?: string | null;
+  table_ids: string[];
+  party_card_ids: string[];
 };
 
-export type PosVisitUpdateDto = Partial<PosVisitCreateDto>;
+export type PosVisitUpdateDto = Partial<{
+  source_type: Visit["sourceType"] | string;
+  status: Visit["status"] | string;
+  expected_end_at: string;
+  completed_at: string | null;
+  is_joined: boolean;
+  joined_at: string | null;
+}>;
 
 export type PosOrderItemDto = {
   id: string;
@@ -211,30 +230,37 @@ export type PosOrderDto = {
   id: string;
   session_id: string;
   visit_id: string;
-  segment_id?: string | null;
   order_number: number;
+  order_type: Order["orderType"] | "qrFallback" | string;
   ordered_by_type: Order["orderedBy"]["type"] | string;
   ordered_by_name: string;
-  order_type: Order["orderType"] | string;
-  items: PosOrderItemDto[];
+  idempotency_key?: string | null;
+  client_generated_order_id?: string | null;
+  source?: string | null;
   created_at: string;
   updated_at: string;
+  items: PosOrderItemDto[];
+  segment_id?: string | null;
 };
 
 export type PosOrderCreateDto = {
   visit_id: string;
-  segment_id?: string | null;
+  order_type?: Order["orderType"] | "qrFallback" | string;
   ordered_by_type?: Order["orderedBy"]["type"] | string;
   ordered_by_name?: string;
-  order_type?: Order["orderType"] | string;
+  idempotency_key?: string | null;
+  client_generated_order_id?: string | null;
+  source?: string | null;
   items: Array<Omit<PosOrderItemDto, "id"> & { id?: string }>;
 };
 
 export type PosOrderUpdateDto = Partial<{
-  segment_id: string | null;
+  order_type: Order["orderType"] | "qrFallback" | string;
   ordered_by_type: Order["orderedBy"]["type"] | string;
   ordered_by_name: string;
-  order_type: Order["orderType"] | string;
+  idempotency_key: string | null;
+  client_generated_order_id: string | null;
+  source: string | null;
   items: Array<Omit<PosOrderItemDto, "id"> & { id?: string }>;
 }>;
 
@@ -252,23 +278,24 @@ export type PosPaymentDto = {
   session_id: string;
   visit_id: string;
   table_label: string;
-  segment_id?: string | null;
   paid_at: string;
-  items: PosPaymentItemDto[];
   total_amount: number;
   discount_amount: number;
   status: Payment["status"] | string;
   is_prepaid: boolean;
+  restored_at?: string | null;
+  cancelled_at?: string | null;
+  items?: PosPaymentItemDto[];
+  segment_id?: string | null;
 };
 
 export type PosPaymentCreateDto = {
   visit_id: string;
   table_label: string;
-  segment_id?: string | null;
-  items: PosPaymentItemDto[];
   total_amount: number;
   discount_amount: number;
   is_prepaid: boolean;
+  items: PosPaymentItemDto[];
 };
 
 export type PosStaffDeviceDto = {
@@ -277,8 +304,9 @@ export type PosStaffDeviceDto = {
   activation_code: string;
   staff_name: string;
   device_name?: string | null;
+  status: "active" | "deleted" | string;
   connected_at: string;
-  status: StaffDevice["status"] | string;
+  deleted_at?: string | null;
 };
 
 export type PosStaffDeviceCreateDto = {
@@ -290,21 +318,18 @@ export type PosStaffDeviceCreateDto = {
 export type PosQrOrderRegistrationDto = {
   id: string;
   session_id: string;
-  visit_id: string;
-  table_id?: string | null;
+  visit_id?: string | null;
+  order_id?: string | null;
   idempotency_key: string;
-  staff_name?: string | null;
-  items: Array<Pick<OrderItem, "menuItemId" | "menuName" | "unitPrice" | "quantity">>;
-  created_order_id?: string | null;
-  created_at: string;
+  payload_json: Record<string, unknown>;
+  registered_at: string;
 };
 
 export type PosQrOrderRegistrationCreateDto = {
-  visit_id: string;
-  table_id?: string | null;
+  visit_id?: string | null;
+  order_id?: string | null;
   idempotency_key: string;
-  staff_name?: string | null;
-  items: Array<Pick<OrderItem, "menuItemId" | "menuName" | "unitPrice" | "quantity">>;
+  payload_json: Record<string, unknown>;
 };
 
 export type PosTimeAdjustmentLogDto = {

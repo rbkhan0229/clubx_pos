@@ -33,8 +33,8 @@ export function mapPosSessionDtoToBusinessSession(dto: PosBusinessSessionDto): B
   return {
     id: dto.id,
     name: dto.name,
-    createdAt: dto.opened_at,
-    lastAccessedAt: dto.last_accessed_at ?? null,
+    createdAt: dto.created_at ?? dto.opened_at,
+    lastAccessedAt: null,
   };
 }
 
@@ -44,13 +44,19 @@ export function mapPosTableDtoToTable(dto: PosTableDto): Table {
     sessionId: dto.session_id,
     number: dto.number,
     status: dto.status === "occupied" || dto.status === "cleaning" ? dto.status : "empty",
-    size: tableSize(dto.size),
+    size: tableSize(dto.visual_size),
     minCapacity: dto.min_capacity,
     maxCapacity: dto.max_capacity,
     x: dto.x,
     y: dto.y,
-    mergedGroupId: dto.merge_group_id ?? undefined,
-    originalPosition: dto.original_position ?? undefined,
+    mergedGroupId: dto.merged_group_id ?? undefined,
+    originalPosition:
+      dto.original_x !== null &&
+      dto.original_x !== undefined &&
+      dto.original_y !== null &&
+      dto.original_y !== undefined
+        ? { x: dto.original_x, y: dto.original_y }
+        : undefined,
   };
 }
 
@@ -61,7 +67,9 @@ export function mapTableToPosTableCreateDto(table: Table): PosTableCreateDto {
     max_capacity: table.maxCapacity,
     x: table.x,
     y: table.y,
-    size: table.size,
+    visual_size: table.size,
+    original_x: table.originalPosition?.x ?? null,
+    original_y: table.originalPosition?.y ?? null,
   };
 }
 
@@ -101,7 +109,6 @@ function mapPosOrderItemDtoToOrderItem(item: PosOrderDto["items"][number]): Orde
 export function mapOrderToPosOrderCreateDto(order: Order): PosOrderCreateDto {
   return {
     visit_id: order.visitId,
-    segment_id: order.segmentId ?? null,
     ordered_by_type: order.orderedBy.type,
     ordered_by_name: order.orderedBy.name,
     order_type: order.orderType,
@@ -126,7 +133,7 @@ export function mapPosPaymentDtoToPayment(dto: PosPaymentDto): Payment {
     tableLabel: dto.table_label,
     segmentId: dto.segment_id ?? undefined,
     paidAt: dto.paid_at,
-    items: dto.items.map((item) => ({
+    items: (dto.items ?? []).map((item) => ({
       menuItemId: item.menu_item_id ?? undefined,
       menuName: item.menu_name,
       unitPrice: item.unit_price,
@@ -145,7 +152,6 @@ export function mapPaymentToPosPaymentCreateDto(payment: Payment): PosPaymentCre
   return {
     visit_id: payment.visitId,
     table_label: payment.tableLabel,
-    segment_id: payment.segmentId ?? null,
     items: payment.items.map((item) => ({
       menu_item_id: item.menuItemId ?? null,
       menu_name: item.menuName,
@@ -168,8 +174,8 @@ export function mapPosPartyCardDtoToPartyCard(dto: PosPartyCardDto): PartyCard {
     code: dto.code,
     reservationTime: dto.reservation_time ?? undefined,
     waitingOrder: dto.waiting_order ?? undefined,
-    guests: dto.guests.map((guest) => ({
-      id: guest.id,
+    guests: (dto.guests ?? []).map((guest, index) => ({
+      id: guest.id ?? `${dto.id}:guest:${index}`,
       name: guest.name,
       phone: guest.phone ?? undefined,
       username: guest.username ?? undefined,
@@ -200,11 +206,10 @@ export function mapPartyCardToPosPartyCardCreateDto(card: PartyCard): PosPartyCa
       username: guest.username ?? null,
       checked_in: guest.checkedIn,
     })),
-    guest_count: card.guestCount ?? null,
+    guest_count: card.guestCount ?? card.guests.length,
     table_count: card.tableCount,
     status: card.status,
     source_id: card.sourceId ?? null,
-    mapped_table_ids: card.mappedTableIds ?? [],
     upstream_status: card.upstreamStatus ?? null,
   };
 }
@@ -213,15 +218,15 @@ export function mapPosVisitDtoToVisit(dto: PosVisitDto): Visit {
   return {
     id: dto.id,
     sessionId: dto.session_id,
-    tableIds: dto.table_ids,
-    partyCardIds: dto.party_card_ids,
+    tableIds: dto.table_ids ?? [],
+    partyCardIds: dto.party_card_ids ?? [],
     sourceType:
       dto.source_type === "waiting" ||
       dto.source_type === "walkIn" ||
       dto.source_type === "joined"
         ? dto.source_type
         : "reservation",
-    sourceId: dto.source_id ?? undefined,
+    sourceId: undefined,
     visitCode: dto.visit_code,
     startedAt: dto.started_at,
     expectedEndAt: dto.expected_end_at,
@@ -239,7 +244,6 @@ export function mapVisitToPosVisitCreateDto(visit: Visit): PosVisitCreateDto {
     table_ids: visit.tableIds,
     party_card_ids: visit.partyCardIds,
     source_type: visit.sourceType,
-    source_id: visit.sourceId ?? null,
     visit_code: visit.visitCode,
     started_at: visit.startedAt,
     expected_end_at: visit.expectedEndAt,
@@ -257,6 +261,6 @@ export function mapPosStaffDeviceDtoToStaffDevice(dto: PosStaffDeviceDto): Staff
     staffName: dto.staff_name,
     deviceName: dto.device_name ?? undefined,
     connectedAt: dto.connected_at,
-    status: dto.status === "kicked" ? "kicked" : "active",
+    status: dto.status === "deleted" ? "kicked" : "active",
   };
 }

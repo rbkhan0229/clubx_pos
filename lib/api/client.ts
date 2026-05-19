@@ -45,7 +45,7 @@ function buildUrl(path: string, query?: Record<string, QueryValue>) {
 }
 
 async function request<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   options: {
     body?: unknown;
@@ -86,5 +86,6 @@ export const api = {
   get: <T>(path: string, query?: Record<string, QueryValue>) =>
     request<T>("GET", path, { query }),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, { body }),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, { body }),
   delete: <T>(path: string) => request<T>("DELETE", path),
 };

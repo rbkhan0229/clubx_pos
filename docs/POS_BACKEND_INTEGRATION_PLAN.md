@@ -61,6 +61,16 @@ Server repositories call `lib/api/posClient.ts`, which uses the existing API cli
 
 Several endpoints, especially menu and time-log list helpers, are intentionally marked with TODOs where backend route details still need to be finalized or wired into Phase 13C.
 
+## Phase 13B Fix Notes
+
+- `lib/api/client.ts` now supports `PATCH`, and POS update calls use `PATCH` where the Phase 13A backend expects it.
+- `deletePosDevice` uses `POST /pos/devices/{device_id}/delete`; table deletion still uses `DELETE /pos/tables/{table_id}`.
+- `splitPosMergeGroup` now expects the backend `PosTableMergeGroupOut` response instead of a generic `{ ok: boolean }`.
+- POS DTOs now mirror backend Phase 13A field names such as `visual_size`, `merged_group_id`, `original_x`, `original_y`, and `payload_json`.
+- Some backend responses currently do not include nested guests, visit `table_ids` / `party_card_ids`, or payment items. Frontend mappers default those fields safely to empty arrays.
+- Backend staff device `deleted` is mapped to frontend `kicked` because the current frontend domain type supports only `active | kicked`.
+- Full store migration remains a Phase 13C task; Phase 13B only keeps the repository boundary route-compatible and type-compatible.
+
 ## Migration Order
 
 1. Sessions
