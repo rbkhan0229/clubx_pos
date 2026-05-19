@@ -1,4 +1,5 @@
 import { WaitingSiteClient } from "@/components/waiting/WaitingSiteClient";
+import { SafeSection } from "@/components/common/SafeSection";
 
 export default async function WaitingSitePage({
   params,
@@ -6,5 +7,9 @@ export default async function WaitingSitePage({
   params: Promise<{ waitingSiteId: string }>;
 }) {
   const { waitingSiteId } = await params;
-  return <WaitingSiteClient waitingSiteId={waitingSiteId} />;
+  return (
+    <SafeSection label="Waiting Site">
+      <WaitingSiteClient waitingSiteId={waitingSiteId} />
+    </SafeSection>
+  );
 }

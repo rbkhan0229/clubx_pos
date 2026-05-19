@@ -1,4 +1,5 @@
 import { PosWorkspace } from "@/components/pos/PosWorkspace";
+import { SafeSection } from "@/components/common/SafeSection";
 
 type CounterSessionPageProps = {
   params: Promise<{
@@ -9,5 +10,9 @@ type CounterSessionPageProps = {
 export default async function CounterSessionPage({ params }: CounterSessionPageProps) {
   const { sessionId } = await params;
 
-  return <PosWorkspace sessionId={sessionId} />;
+  return (
+    <SafeSection label="POS Workspace">
+      <PosWorkspace sessionId={sessionId} />
+    </SafeSection>
+  );
 }

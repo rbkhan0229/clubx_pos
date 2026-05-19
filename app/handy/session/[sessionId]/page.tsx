@@ -1,4 +1,5 @@
 import { HandyWorkspace } from "@/components/handy/HandyWorkspace";
+import { SafeSection } from "@/components/common/SafeSection";
 
 type HandySessionPageProps = {
   params: Promise<{
@@ -8,5 +9,9 @@ type HandySessionPageProps = {
 
 export default async function HandySessionPage({ params }: HandySessionPageProps) {
   const { sessionId } = await params;
-  return <HandyWorkspace sessionId={sessionId} />;
+  return (
+    <SafeSection label="Handy Order Canvas">
+      <HandyWorkspace sessionId={sessionId} />
+    </SafeSection>
+  );
 }

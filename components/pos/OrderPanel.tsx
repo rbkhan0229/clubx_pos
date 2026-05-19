@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
@@ -27,6 +27,7 @@ const EMPTY_MENU_ITEMS: MenuItem[] = [];
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
 const EMPTY_PAYMENTS: Payment[] = [];
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_VISITS: Visit[] = [];
 const EMPTY_LOGS: Array<{
   id: string;
   visitId: string;
@@ -248,13 +249,16 @@ function OrderPanelHome({
   const latestVisit = useVisitStore((state) =>
     state.visitsBySession[table.sessionId]?.find((item) => item.id === visit.id),
   );
-  const allVisits = useVisitStore((state) => state.visitsBySession[table.sessionId] ?? []);
+  const allVisits = useVisitStore(
+    (state) => state.visitsBySession[table.sessionId] ?? EMPTY_VISITS,
+  );
   const sessionTables = useTableStore(
     (state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES,
   );
   const activeVisit = latestVisit ?? visit;
   const tableLabel = getVisitTableLabel(activeVisit, sessionTables, table);
   const adjustVisitTime = useVisitStore((state) => state.adjustVisitTime);
+  const createOrder = useOrderStore((state) => state.createOrder);
   const partyCards = useVisitStore(
     (state) => state.partyCardsBySession[table.sessionId] ?? EMPTY_PARTY_CARDS,
   );
@@ -263,6 +267,11 @@ function OrderPanelHome({
   );
   const [moveWarningOpen, setMoveWarningOpen] = useState(false);
   const [moveWarningMessage, setMoveWarningMessage] = useState("");
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrPayload, setQrPayload] = useState("");
+  const [qrMessage, setQrMessage] = useState("");
+  const [qrScanning, setQrScanning] = useState(false);
+  const qrVideoRef = useRef<HTMLVideoElement | null>(null);
   const [selectedMovePartyCardIds, setSelectedMovePartyCardIds] = useState<string[]>([]);
   const orders = useMemo(
     () => allOrders.filter((order) => order.visitId === activeVisit.id),
@@ -350,6 +359,55 @@ function OrderPanelHome({
       }),
     [activeVisit, allVisits, mappedPartyCards, sessionTables],
   );
+
+  function stopQrScanner() {
+    const stream = qrVideoRef.current?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((track) => track.stop());
+    if (qrVideoRef.current) qrVideoRef.current.srcObject = null;
+    setQrScanning(false);
+  }
+
+  async function startQrScanner() {
+    const BarcodeDetectorCtor = (window as unknown as {
+      BarcodeDetector?: new (options: { formats: string[] }) => {
+        detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue: string }>>;
+      };
+    }).BarcodeDetector;
+    if (!BarcodeDetectorCtor || !navigator.mediaDevices?.getUserMedia) {
+      setQrMessage(t.qrCameraUnavailable);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
+      if (!qrVideoRef.current) return;
+      qrVideoRef.current.srcObject = stream;
+      await qrVideoRef.current.play();
+      setQrScanning(true);
+      const detector = new BarcodeDetectorCtor({ formats: ["qr_code"] });
+      const scan = async () => {
+        if (!qrVideoRef.current?.srcObject) return;
+        const codes = await detector.detect(qrVideoRef.current);
+        if (codes[0]?.rawValue) {
+          setQrPayload(codes[0].rawValue);
+          setQrMessage("");
+          stopQrScanner();
+          return;
+        }
+        window.requestAnimationFrame(scan);
+      };
+      window.requestAnimationFrame(scan);
+    } catch {
+      setQrMessage(t.qrCameraDenied);
+      stopQrScanner();
+    }
+  }
+
+  useEffect(() => {
+    if (!qrOpen) stopQrScanner();
+    return () => stopQrScanner();
+  }, [qrOpen]);
 
   function toggleMovePartyCard(partyCardId: string) {
     setSelectedMovePartyCardIds((current) =>
@@ -473,7 +531,12 @@ function OrderPanelHome({
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-3 text-lg font-black">{t.orderDashboard}</h3>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-lg font-black">{t.orderDashboard}</h3>
+            <Button className="px-3 py-2 text-xs" onClick={() => setQrOpen(true)} variant="secondary">
+              {t.registerQrOrder}
+            </Button>
+          </div>
           <div className="grid gap-2">
             {orders.map((order) => (
               <button
@@ -536,7 +599,7 @@ function OrderPanelHome({
                     </p>
                   </div>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600">
-                    {t.guestCount}: {partyCard.guests.length}
+                    {t.guestCount}: {getPartyCardGuestCount(partyCard)}
                   </span>
                 </div>
                 {partyCard.type === "reservation" ? (
@@ -591,6 +654,65 @@ function OrderPanelHome({
               <Button onClick={() => setMoveWarningOpen(false)}>{t.close}</Button>
             </div>
           </Modal>
+          <Modal onClose={() => setQrOpen(false)} open={qrOpen} title={t.registerQrOrder}>
+            <div className="grid gap-4">
+              <p className="text-sm font-bold text-slate-600">
+                TODO: Later this should be replaced with signed payloads and server validation.
+              </p>
+              <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <video
+                  className="aspect-video w-full rounded-xl bg-black object-cover"
+                  muted
+                  playsInline
+                  ref={qrVideoRef}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button onClick={startQrScanner} type="button" variant="secondary">
+                    {qrScanning ? t.activeStatus : t.scanQr}
+                  </Button>
+                  <Button onClick={stopQrScanner} type="button" variant="secondary">
+                    {t.cancel}
+                  </Button>
+                </div>
+              </div>
+              <label className="grid gap-2 text-sm font-bold text-slate-600">
+                {t.qrPayload}
+                <textarea
+                  className="h-36 rounded-2xl border border-slate-200 p-3 text-xs font-bold outline-none focus:border-club-green"
+                  onChange={(event) => setQrPayload(event.target.value)}
+                  value={qrPayload}
+                />
+              </label>
+              {qrMessage ? (
+                <p className="rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-600">
+                  {qrMessage}
+                </p>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button onClick={() => setQrOpen(false)} variant="secondary">
+                  {t.cancel}
+                </Button>
+                <Button
+                  onClick={() => {
+                    const result = registerQrOrder({
+                      payload: qrPayload,
+                      sessionId: table.sessionId,
+                      visit: activeVisit,
+                      table,
+                      createOrder,
+                      t,
+                    });
+                    setQrMessage(result.message);
+                    if (result.ok) {
+                      setQrPayload("");
+                    }
+                  }}
+                >
+                  {t.confirmOrder}
+                </Button>
+              </div>
+            </div>
+          </Modal>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -611,8 +733,8 @@ function OrderPanelHome({
             </Button>
           </div>
           {logs.length > 0 ? (
-            <ul className="mt-3 grid gap-1 text-xs font-bold text-slate-600">
-              {logs.slice(-3).map((log) => (
+            <ul className="mt-3 max-h-32 overflow-y-auto rounded-2xl bg-white p-3 text-xs font-bold text-slate-600">
+              {[...logs].reverse().map((log) => (
                 <li key={log.id}>{language === "ko" ? log.messageKo : log.messageEn}</li>
               ))}
             </ul>
@@ -1520,6 +1642,80 @@ function calculateRemainingMinutesByPolicy({
         : Math.max(...cardVisitTimes)
       : fallback;
   return Math.max(0, Math.ceil((selectedTime - now) / 60_000));
+}
+
+function getPartyCardGuestCount(partyCard: PartyCard) {
+  return partyCard.guests.length > 0 ? partyCard.guests.length : partyCard.guestCount ?? 1;
+}
+
+type QrOrderPayload = {
+  schemaVersion: number;
+  sessionId: string;
+  tableId?: string;
+  visitId?: string;
+  idempotencyKey?: string;
+  staffName?: string;
+  items?: Array<{
+    menuItemId: string;
+    menuName: string;
+    unitPrice: number;
+    quantity: number;
+  }>;
+};
+
+function registerQrOrder({
+  payload,
+  sessionId,
+  visit,
+  table,
+  createOrder,
+  t,
+}: {
+  payload: string;
+  sessionId: string;
+  visit: Visit;
+  table: Table;
+  createOrder: ReturnType<typeof useOrderStore.getState>["createOrder"];
+  t: ReturnType<typeof getDictionary>;
+}) {
+  try {
+    const parsed = JSON.parse(payload) as QrOrderPayload;
+    if (
+      parsed.schemaVersion !== 1 ||
+      parsed.sessionId !== sessionId ||
+      parsed.visitId !== visit.id ||
+      !parsed.idempotencyKey ||
+      !Array.isArray(parsed.items) ||
+      parsed.items.length === 0
+    ) {
+      return { ok: false, message: "Invalid QR payload." };
+    }
+    const key = `clubx-pos:qr-orders:${sessionId}`;
+    let existing: string[] = [];
+    try {
+      existing = JSON.parse(window.localStorage.getItem(key) ?? "[]") as string[];
+    } catch {
+      window.localStorage.removeItem(key);
+    }
+    if (existing.includes(parsed.idempotencyKey)) {
+      return { ok: false, message: t.qrOrderAlreadyRegistered };
+    }
+    createOrder({
+      sessionId,
+      visitId: visit.id,
+      orderedBy: { type: "handy", name: parsed.staffName || "QR Fallback" },
+      items: parsed.items.map((item) => ({
+        menuItemId: item.menuItemId,
+        menuName: item.menuName,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+      })),
+    });
+    window.localStorage.setItem(key, JSON.stringify([...existing, parsed.idempotencyKey]));
+    return { ok: true, message: t.registerQrOrderPrompt };
+  } catch {
+    return { ok: false, message: "Invalid QR payload." };
+  }
 }
 
 function orderTypeText(orderType: Order["orderType"], t: ReturnType<typeof getDictionary>) {

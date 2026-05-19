@@ -15,7 +15,7 @@ type VisitState = {
   joinRecordsBySession: Record<string, JoinRecord[]>;
   timeLogsByVisit: Record<string, TimeAdjustmentLog[]>;
   loadVisits: (sessionId: string) => void;
-  createWalkInVisit: (sessionId: string, tableId: string) => WalkInResult;
+  createWalkInVisit: (sessionId: string, tableId: string | string[], guestCount?: number) => WalkInResult;
   createWaitingPartyCard: (sessionId: string, guests: PartyCard["guests"]) => PartyCard;
   getActiveVisitForTable: (sessionId: string, tableId: string) => Visit | undefined;
   getPartyCard: (sessionId: string, partyCardId: string) => PartyCard | undefined;
@@ -59,6 +59,18 @@ const visitKey = (sessionId: string) => `clubx-pos:visits:${sessionId}`;
 const joinKey = (sessionId: string) => `clubx-pos:join-records:${sessionId}`;
 const logKey = (sessionId: string) => `clubx-pos:time-logs:${sessionId}`;
 
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    window.localStorage.removeItem(key);
+    return fallback;
+  }
+}
+
 function saveVisitState(
   sessionId: string,
   partyCards: PartyCard[],
@@ -99,48 +111,47 @@ export const useVisitStore = create<VisitState>((set, get) => ({
   loadVisits: (sessionId) => {
     if (typeof window === "undefined") return;
 
-    const rawPartyCards = window.localStorage.getItem(partyKey(sessionId));
-    const rawVisits = window.localStorage.getItem(visitKey(sessionId));
-    const rawJoins = window.localStorage.getItem(joinKey(sessionId));
-    const rawLogs = window.localStorage.getItem(logKey(sessionId));
     set((state) => ({
       partyCardsBySession: {
         ...state.partyCardsBySession,
-        [sessionId]: rawPartyCards ? (JSON.parse(rawPartyCards) as PartyCard[]) : [],
+        [sessionId]: readJson<PartyCard[]>(partyKey(sessionId), []),
       },
       visitsBySession: {
         ...state.visitsBySession,
-        [sessionId]: rawVisits ? (JSON.parse(rawVisits) as Visit[]) : [],
+        [sessionId]: readJson<Visit[]>(visitKey(sessionId), []),
       },
       joinRecordsBySession: {
         ...state.joinRecordsBySession,
-        [sessionId]: rawJoins ? (JSON.parse(rawJoins) as JoinRecord[]) : [],
+        [sessionId]: readJson<JoinRecord[]>(joinKey(sessionId), []),
       },
       timeLogsByVisit: {
         ...state.timeLogsByVisit,
-        ...(rawLogs ? (JSON.parse(rawLogs) as Record<string, TimeAdjustmentLog[]>) : {}),
+        ...readJson<Record<string, TimeAdjustmentLog[]>>(logKey(sessionId), {}),
       },
     }));
   },
-  createWalkInVisit: (sessionId, tableId) => {
+  createWalkInVisit: (sessionId, tableId, guestCount = 1) => {
     const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
     const currentVisits = get().visitsBySession[sessionId] ?? [];
     const count = currentPartyCards.filter((card) => card.type === "walkIn").length + 1;
     const code = `WALK-${String(count).padStart(3, "0")}`;
     const now = new Date().toISOString();
+    const tableIds = Array.isArray(tableId) ? tableId : [tableId];
     const partyCard: PartyCard = {
       id: `party-${sessionId}-${Date.now()}`,
       sessionId,
       type: "walkIn",
       code,
       guests: [],
+      guestCount: Math.max(1, Math.floor(guestCount)),
       tableCount: 1,
       status: "seated",
+      mappedTableIds: tableIds,
     };
     const visit: Visit = {
       id: `visit-${sessionId}-${Date.now()}`,
       sessionId,
-      tableIds: [tableId],
+      tableIds,
       partyCardIds: [partyCard.id],
       sourceType: "walkIn",
       sourceId: partyCard.id,
@@ -345,7 +356,6 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       joinedAt: now,
       targetTableLabel: metadata?.targetTableLabel ?? targetVisit.visitCode,
       targetPreJoinOrderIds: metadata?.targetPreJoinOrderIds ?? [],
-      afterJoinOrderIds: [],
     };
     const nextJoinRecords = [...currentJoinRecords, joinRecord];
     let joinedVisit: Visit | undefined;
@@ -427,7 +437,6 @@ export const useVisitStore = create<VisitState>((set, get) => ({
       sourceTableLabel: metadata?.sourceTableLabel ?? sourceVisit.visitCode,
       targetPreJoinOrderIds: metadata?.targetPreJoinOrderIds ?? [],
       sourcePreJoinOrderIds: metadata?.sourcePreJoinOrderIds ?? [],
-      afterJoinOrderIds: [],
     };
     const nextJoinRecords = [...currentJoinRecords, joinRecord];
     let nextSourceVisit: Visit | undefined;
@@ -492,7 +501,13 @@ export const useVisitStore = create<VisitState>((set, get) => ({
     const visits = get().visitsBySession[sessionId] ?? [];
     const nextVisits = visits.map((visit) =>
       visit.id === visitId
-        ? { ...visit, expectedEndAt: addMinutes(visit.expectedEndAt, minutes) }
+        ? {
+            ...visit,
+            expectedEndAt:
+              minutes > 0 && new Date(visit.expectedEndAt).getTime() < Date.now()
+                ? addMinutes(new Date().toISOString(), minutes)
+                : addMinutes(visit.expectedEndAt, minutes),
+          }
         : visit,
     );
     const log: TimeAdjustmentLog = {
@@ -539,12 +554,20 @@ export const useVisitStore = create<VisitState>((set, get) => ({
   },
   updateVisitTableIds: (sessionId, visitId, tableIds) => {
     const visits = get().visitsBySession[sessionId] ?? [];
+    const visit = visits.find((item) => item.id === visitId);
     const nextVisits = visits.map((visit) =>
       visit.id === visitId ? { ...visit, tableIds } : visit,
     );
-    const partyCards = get().partyCardsBySession[sessionId] ?? [];
+    const mappedPartyCardIds = new Set(visit?.partyCardIds ?? []);
+    const partyCards = (get().partyCardsBySession[sessionId] ?? []).map((card) =>
+      mappedPartyCardIds.has(card.id) ? { ...card, mappedTableIds: tableIds } : card,
+    );
     saveVisitState(sessionId, partyCards, nextVisits, get().timeLogsByVisit);
     set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: partyCards,
+      },
       visitsBySession: {
         ...state.visitsBySession,
         [sessionId]: nextVisits,

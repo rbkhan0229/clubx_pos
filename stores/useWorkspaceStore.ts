@@ -56,7 +56,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     const raw = window.localStorage.getItem(capacityPresetKey);
     if (!raw) return;
 
-    const parsed = JSON.parse(raw) as { minCapacity: number; maxCapacity: number };
+    let parsed: { minCapacity: number; maxCapacity: number };
+    try {
+      parsed = JSON.parse(raw) as { minCapacity: number; maxCapacity: number };
+    } catch {
+      window.localStorage.removeItem(capacityPresetKey);
+      return;
+    }
     set({
       lastTableCapacityPreset: {
         minCapacity: Math.max(1, parsed.minCapacity || 1),

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
+import { SafeSection } from "@/components/common/SafeSection";
 import { MenuSettingsModal } from "@/components/pos/MenuSettingsModal";
 import { OrderPanel } from "@/components/pos/OrderPanel";
 import { PosToolbar } from "@/components/pos/PosToolbar";
@@ -13,6 +14,7 @@ import { TableEditActionBar } from "@/components/pos/TableEditActionBar";
 import { TableMergeActionBar } from "@/components/pos/TableMergeActionBar";
 import { getDictionary } from "@/lib/i18n/dictionaries";
 import { subscribeClubxSync } from "@/lib/localSync";
+import { resetClubxLocalData, sanitizeSessionLocalData } from "@/lib/localDataMaintenance";
 import { useAppStore } from "@/stores/useAppStore";
 import { useTableStore } from "@/stores/useTableStore";
 import { useMenuStore } from "@/stores/useMenuStore";
@@ -34,7 +36,8 @@ export type TableModalState =
   | { type: "none" }
   | { type: "capacity"; x: number; y: number }
   | { type: "message"; title: string; body: string }
-  | { type: "walkInConfirm"; table: Table }
+  | { type: "resetLocalDataConfirm" }
+  | { type: "walkInConfirm"; table: Table; error?: string }
   | { type: "cleaningConfirm"; table: Table }
   | { type: "order"; table: Table }
   | { type: "mergeConfirm"; tables: Table[] }
@@ -123,6 +126,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
   const [salesReportOpen, setSalesReportOpen] = useState(false);
 
   useEffect(() => {
+    sanitizeSessionLocalData(sessionId);
     loadTables(sessionId);
     loadMenu(sessionId);
     loadOrders(sessionId);
@@ -246,11 +250,17 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       : null;
     if (group) {
       const groupTables = tables.filter((table) => group.tableIds.includes(table.id));
-      if (groupTables.some((table) => table.status !== "empty")) {
+      const activeVisits = getActiveVisitsForTables(groupTables, (tableId) =>
+        getActiveVisitForTable(sessionId, tableId),
+      );
+      const hasOrderHistory = activeVisits.some((visit) =>
+        orders.some((order) => order.visitId === visit.id),
+      );
+      if (hasOrderHistory) {
         setModal({
           type: "message",
           title: t.splitMergedTableTitle,
-          body: t.onlyEmptyMergedTablesCanSplit,
+          body: t.mergedTableHasOrdersCannotSplit,
         });
         return;
       }
@@ -305,6 +315,19 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
 
   function confirmSplit() {
     if (modal.type !== "splitConfirm") return;
+    const groupTables = tables.filter((table) => table.mergedGroupId === modal.groupId);
+    const occupiedTables = groupTables.filter((table) => table.status === "occupied");
+    const activeVisits = getActiveVisitsForTables(occupiedTables, (tableId) =>
+      getActiveVisitForTable(sessionId, tableId),
+    );
+    if (occupiedTables.length > 0 && activeVisits.length > 0) {
+      const primaryTable = [...occupiedTables].sort((a, b) => Number(a.number) - Number(b.number))[0];
+      const primaryVisit = activeVisits[0];
+      updateVisitTableIds(sessionId, primaryVisit.id, [primaryTable.id]);
+      occupiedTables.forEach((table) =>
+        updateTable(table.id, { status: table.id === primaryTable.id ? "occupied" : "empty" }),
+      );
+    }
     splitMergeGroup(sessionId, modal.groupId);
     closeModal();
     setTableMergeMode(false);
@@ -318,9 +341,22 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     setTableEditMode("idle");
   }
 
-  function confirmWalkIn(table: Table) {
-    createWalkInVisit(sessionId, table.id);
-    updateTable(table.id, { status: "occupied" });
+  function confirmWalkIn(table: Table, guestCount: number) {
+    if (!Number.isInteger(guestCount) || guestCount < 1) {
+      setModal({ type: "walkInConfirm", table, error: t.guestCountRequired });
+      return;
+    }
+    const group = table.mergedGroupId ? getMergeGroupByTableId(sessionId, table.id) : null;
+    const targetCapacity = group
+      ? getMergedGroupCapacity(sessionId, group.id).maxCapacity
+      : table.maxCapacity;
+    if (guestCount > targetCapacity) {
+      setModal({ type: "walkInConfirm", table, error: t.partyExceedsTableCapacity });
+      return;
+    }
+    const tableIds = group?.tableIds ?? [table.id];
+    createWalkInVisit(sessionId, tableIds, guestCount);
+    tableIds.forEach((tableId) => updateTable(tableId, { status: "occupied" }));
     setModal({ type: "order", table: { ...table, status: "occupied" } });
   }
 
@@ -349,9 +385,9 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       if (!visit || visit.status !== "active") return false;
       const existingGuests = visit.partyCardIds.reduce((sum, partyCardId) => {
         const mappedCard = getPartyCard(sessionId, partyCardId);
-        return sum + (mappedCard?.guests.length ?? 0);
+        return sum + getPartyCardGuestCount(mappedCard);
       }, 0);
-      const incomingGuests = partyCard.guests.length;
+      const incomingGuests = getPartyCardGuestCount(partyCard);
       const totalGuests = existingGuests + incomingGuests;
       if (totalGuests > targetCapacity) {
         setModal({
@@ -375,7 +411,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       return true;
     }
 
-    if (partyCard.guests.length > targetCapacity) {
+    if (getPartyCardGuestCount(partyCard) > targetCapacity) {
       setModal({
         type: "message",
         title: t.assignToTable,
@@ -440,7 +476,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       targetTableIds.includes(tableId),
     );
 
-    if (table.status !== "occupied" || sameSource) {
+    if ((table.status !== "occupied" && table.status !== "empty") || sameSource) {
       setModal({
         type: "message",
         title: t.moveJoin,
@@ -450,7 +486,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     }
 
     const targetVisit = getActiveVisitForTable(sessionId, table.id);
-    if (!targetVisit || targetVisit.status !== "active") {
+    if (table.status === "occupied" && (!targetVisit || targetVisit.status !== "active")) {
       setModal({
         type: "message",
         title: t.moveJoin,
@@ -462,12 +498,12 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
     const capacity = group
       ? getMergedGroupCapacity(sessionId, group.id).maxCapacity
       : table.maxCapacity;
-    const existingGuests = targetVisit.partyCardIds.reduce((sum, partyCardId) => {
+    const existingGuests = targetVisit?.partyCardIds.reduce((sum, partyCardId) => {
       const mappedCard = getPartyCard(sessionId, partyCardId);
-      return sum + (mappedCard?.guests.length ?? 0);
-    }, 0);
+      return sum + getPartyCardGuestCount(mappedCard);
+    }, 0) ?? 0;
     const incomingGuests = partyCardMove.partyCards.reduce(
-      (sum, partyCard) => sum + partyCard.guests.length,
+      (sum, partyCard) => sum + getPartyCardGuestCount(partyCard),
       0,
     );
     const totalGuests = existingGuests + incomingGuests;
@@ -486,7 +522,7 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       table,
       partyCards: partyCardMove.partyCards,
       sourceVisit: partyCardMove.sourceVisit,
-      targetVisit,
+      targetVisit: targetVisit ?? emptyMoveTargetVisit(sessionId, targetTableIds),
       sourceLabel: partyCardMove.sourceLabel,
       targetLabel,
       sourceTableIds: partyCardMove.sourceVisit.tableIds,
@@ -501,6 +537,14 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
 
   function confirmMoveJoin() {
     if (modal.type !== "moveJoinConfirm") return;
+    if (modal.table.status === "empty") {
+      modal.sourceTableIds.forEach((tableId) => updateTable(tableId, { status: "cleaning" }));
+      modal.targetTableIds.forEach((tableId) => updateTable(tableId, { status: "occupied" }));
+      updateVisitTableIds(sessionId, modal.sourceVisit.id, modal.targetTableIds);
+      setPartyCardMove(null);
+      closeModal();
+      return;
+    }
     const result = movePartyCardToVisit(
       sessionId,
       modal.sourceVisit.id,
@@ -541,20 +585,27 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       }`}
     >
       <section className="grid min-h-screen min-w-0 grid-rows-[76px_minmax(0,1fr)]">
-        <PosToolbar
-          onOpenMenuSettings={() => setMenuSettingsOpen(true)}
-          onOpenSalesReport={() => setSalesReportOpen(true)}
-          sessionId={sessionId}
-        />
-        <TableCanvas
-          hasDuplicateNumbers={hasDuplicateNumbers}
-          onAssignSelectedPartyCard={assignSelectedPartyCard}
-          onOpenModal={setModal}
-          onPartyCardMoveTarget={selectPartyCardMoveTarget}
-          sessionId={sessionId}
-        />
+        <SafeSection label="POS Toolbar">
+          <PosToolbar
+            onOpenMenuSettings={() => setMenuSettingsOpen(true)}
+            onOpenSalesReport={() => setSalesReportOpen(true)}
+            onResetLocalData={() => setModal({ type: "resetLocalDataConfirm" })}
+            sessionId={sessionId}
+          />
+        </SafeSection>
+        <SafeSection label="Table Canvas">
+          <TableCanvas
+            hasDuplicateNumbers={hasDuplicateNumbers}
+            onAssignSelectedPartyCard={assignSelectedPartyCard}
+            onOpenModal={setModal}
+            onPartyCardMoveTarget={selectPartyCardMoveTarget}
+            sessionId={sessionId}
+          />
+        </SafeSection>
       </section>
-      <RightSidebar sessionId={sessionId} />
+      <SafeSection label="Right Sidebar">
+        <RightSidebar sessionId={sessionId} />
+      </SafeSection>
 
       <TableEditActionBar
         disabled={tableEditMode === "number" && hasDuplicateNumbers}
@@ -587,16 +638,20 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
       ) : null}
 
       <CapacityModal modal={modal} onClose={closeModal} sessionId={sessionId} />
-      <MenuSettingsModal
-        onClose={() => setMenuSettingsOpen(false)}
-        open={menuSettingsOpen}
-        sessionId={sessionId}
-      />
-      <SalesReportModal
-        onClose={() => setSalesReportOpen(false)}
-        open={salesReportOpen}
-        sessionId={sessionId}
-      />
+      <SafeSection label="Menu Settings">
+        <MenuSettingsModal
+          onClose={() => setMenuSettingsOpen(false)}
+          open={menuSettingsOpen}
+          sessionId={sessionId}
+        />
+      </SafeSection>
+      <SafeSection label="Sales Report">
+        <SalesReportModal
+          onClose={() => setSalesReportOpen(false)}
+          open={salesReportOpen}
+          sessionId={sessionId}
+        />
+      </SafeSection>
 
       <Modal onClose={closeModal} open={modal.type === "message"} title={modal.type === "message" ? modal.title : ""}>
         {modal.type === "message" ? (
@@ -604,14 +659,40 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         ) : null}
       </Modal>
 
-      <OrderPanel
+      <Modal
         onClose={closeModal}
-        onStartPartyCardMove={startPartyCardMove}
-        open={modal.type === "order"}
-        partyCard={activePartyCard}
-        table={orderTable}
-        visit={activeVisit}
-      />
+        open={modal.type === "resetLocalDataConfirm"}
+        title={t.resetLocalDataTitle}
+      >
+        <div className="grid gap-5">
+          <p className="text-sm font-semibold text-slate-600">{t.resetLocalDataPrompt}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={closeModal} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                resetClubxLocalData();
+                window.location.href = "/login";
+              }}
+              variant="danger"
+            >
+              {t.resetLocalData}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <SafeSection label="Order Panel">
+        <OrderPanel
+          onClose={closeModal}
+          onStartPartyCardMove={startPartyCardMove}
+          open={modal.type === "order"}
+          partyCard={activePartyCard}
+          table={orderTable}
+          visit={activeVisit}
+        />
+      </SafeSection>
 
       <Modal
         onClose={closeModal}
@@ -619,19 +700,42 @@ export function PosWorkspace({ sessionId }: PosWorkspaceProps) {
         title={t.createWalkInTitle}
       >
         {modal.type === "walkInConfirm" ? (
-          <div className="grid gap-5">
+          <form
+            className="grid gap-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              confirmWalkIn(modal.table, Number(form.get("guestCount")));
+            }}
+          >
             <p className="text-sm font-semibold text-slate-600">
               {t.createWalkInPrompt}
             </p>
+            <label className="grid gap-2 text-sm font-bold text-slate-600">
+              {t.guestCount}
+              <input
+                className="touch-target rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-club-green"
+                min={1}
+                name="guestCount"
+                required
+                step={1}
+                type="number"
+              />
+            </label>
+            {modal.error ? (
+              <p className="rounded-2xl bg-club-red/10 p-3 text-sm font-bold text-club-red">
+                {modal.error}
+              </p>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <Button onClick={closeModal} variant="secondary">
                 {t.cancel}
               </Button>
-              <Button onClick={() => confirmWalkIn(modal.table)}>
+              <Button type="submit">
                 {t.createWalkIn}
               </Button>
             </div>
-          </div>
+          </form>
         ) : null}
       </Modal>
 
@@ -833,6 +937,38 @@ function getPayableAmountForVisit(orders: Order[], visitId: string) {
       const serviceQuantity = Math.min(item.serviceQuantity, activeQuantity);
       return sum + (activeQuantity - serviceQuantity) * item.unitPrice;
     }, 0);
+}
+
+function getActiveVisitsForTables(tables: Table[], getActiveVisit: (tableId: string) => Visit | undefined) {
+  const visits = tables
+    .map((table) => getActiveVisit(table.id))
+    .filter((visit): visit is Visit => Boolean(visit));
+  const seen = new Set<string>();
+  return visits.filter((visit) => {
+    if (seen.has(visit.id)) return false;
+    seen.add(visit.id);
+    return true;
+  });
+}
+
+function getPartyCardGuestCount(partyCard?: PartyCard) {
+  if (!partyCard) return 0;
+  return partyCard.guests.length > 0 ? partyCard.guests.length : partyCard.guestCount ?? 1;
+}
+
+function emptyMoveTargetVisit(sessionId: string, tableIds: string[]): Visit {
+  const now = new Date().toISOString();
+  return {
+    id: `empty-target-${tableIds.join("-")}`,
+    sessionId,
+    tableIds,
+    partyCardIds: [],
+    sourceType: "walkIn",
+    visitCode: "",
+    startedAt: now,
+    expectedEndAt: now,
+    status: "active",
+  };
 }
 
 function CapacityModal({

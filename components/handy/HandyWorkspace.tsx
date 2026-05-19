@@ -21,13 +21,15 @@ const EMPTY_CATEGORIES: MenuCategory[] = [];
 const EMPTY_ITEMS: MenuItem[] = [];
 const EMPTY_ORDERS: Order[] = [];
 const EMPTY_TABLES: Table[] = [];
+const EMPTY_VISITS: Visit[] = [];
 const EMPTY_MERGE_GROUPS: TableMergeGroup[] = [];
 const EMPTY_DEVICES: StaffDevice[] = [];
 
 type HandyMode =
   | { type: "tables" }
   | { type: "order"; table: Table }
-  | { type: "complete"; table: Table; order: Order };
+  | { type: "complete"; table: Table; order: Order }
+  | { type: "logs" };
 
 const tableSizeClass = {
   1: "h-[88px] w-[88px]",
@@ -131,7 +133,11 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <HandyShell onLogout={() => setLogoutOpen(true)} staffName={handyLogin.staffName}>
+    <HandyShell
+      onLogout={() => setLogoutOpen(true)}
+      onOrderLog={() => setMode({ type: "logs" })}
+      staffName={handyLogin.staffName}
+    >
       {mode.type === "tables" ? (
         <div className="grid gap-4">
           <header className="rounded-2xl bg-white p-4 shadow-sm">
@@ -212,13 +218,16 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
           staffName={handyLogin.staffName}
           table={mode.table}
         />
-      ) : (
+      ) : mode.type === "complete" ? (
         <OrderComplete
           onBack={() => setMode({ type: "tables" })}
+          onOrderLog={() => setMode({ type: "logs" })}
           order={mode.order}
           staffName={handyLogin.staffName}
           table={mode.table}
         />
+      ) : (
+        <HandyOrderLog onBack={() => setMode({ type: "tables" })} sessionId={sessionId} staffName={handyLogin.staffName} />
       )}
 
       <Modal
@@ -275,12 +284,16 @@ export function HandyWorkspace({ sessionId }: { sessionId: string }) {
 function HandyShell({
   children,
   onLogout,
+  onOrderLog,
   staffName,
 }: {
   children: React.ReactNode;
   onLogout?: () => void;
+  onOrderLog?: () => void;
   staffName?: string;
 }) {
+  const language = useAppStore((state) => state.language);
+  const t = getDictionary(language);
   return (
     <main className="min-h-screen bg-[#f7f8f2] p-4 text-club-ink">
       <div className="mx-auto grid max-w-3xl gap-4">
@@ -291,10 +304,17 @@ function HandyShell({
               <span>{staffName}</span>
               <button
                 className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black"
+                onClick={onOrderLog}
+                type="button"
+              >
+                {t.orderLog}
+              </button>
+              <button
+                className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black"
                 onClick={onLogout}
                 type="button"
               >
-                Logout
+                {t.logout}
               </button>
             </div>
           </div>
@@ -470,13 +490,134 @@ function HandyAddOrder({
   );
 }
 
+function HandyOrderLog({
+  onBack,
+  sessionId,
+  staffName,
+}: {
+  onBack: () => void;
+  sessionId: string;
+  staffName: string;
+}) {
+  const language = useAppStore((state) => state.language);
+  const t = getDictionary(language);
+  const orders = useOrderStore((state) => state.ordersBySession[sessionId] ?? EMPTY_ORDERS);
+  const visits = useVisitStore((state) => state.visitsBySession[sessionId] ?? EMPTY_VISITS);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const handyOrders = useMemo(
+    () =>
+      orders
+        .filter((order) => order.orderedBy.type === "handy" && order.orderedBy.name === staffName)
+        .slice()
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [orders, staffName],
+  );
+
+  return (
+    <section className="grid gap-4">
+      <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-club-green">
+            Handy Order
+          </p>
+          <h1 className="text-2xl font-black">{t.orderLog}</h1>
+        </div>
+        <button
+          aria-label={t.close}
+          className="grid h-12 w-12 place-items-center rounded-full bg-slate-100"
+          onClick={onBack}
+          type="button"
+        >
+          <X size={24} />
+        </button>
+      </div>
+
+      {handyOrders.length === 0 ? (
+        <p className="rounded-2xl bg-white p-5 text-center font-black text-slate-500">
+          {t.noHandyOrderLogs}
+        </p>
+      ) : (
+        <div className="grid gap-3">
+          {handyOrders.map((order) => {
+            const visit = visits.find((item) => item.id === order.visitId);
+            const table = visit ? tables.find((item) => item.id === visit.tableIds[0]) : undefined;
+            const tableLabel = visit && table ? getVisitTableLabel(visit, tables, table) : "-";
+            const expanded = expandedOrderId === order.id;
+            const payload = buildQrOrderPayload(
+              order,
+              table?.id ?? visit?.tableIds[0] ?? "",
+              staffName,
+            );
+            return (
+              <article className="rounded-2xl bg-white p-4 shadow-sm" key={order.id}>
+                <button
+                  className="grid w-full gap-2 text-left"
+                  onClick={() => setExpandedOrderId(expanded ? null : order.id)}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-lg font-black">
+                      {t.table} {tableLabel}
+                    </p>
+                    <p className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black">
+                      #{order.orderNumber}
+                    </p>
+                  </div>
+                  <p className="text-xs font-bold text-slate-500">{formatDateTime(order.createdAt)}</p>
+                  <p className="text-sm font-bold text-slate-600">{shortItemSummary(order)}</p>
+                </button>
+                {expanded ? (
+                  <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4">
+                    {order.items.map((item) => (
+                      <div
+                        className="flex justify-between rounded-xl bg-slate-50 p-3 text-sm font-bold"
+                        key={item.id}
+                      >
+                        <span>{item.menuName} x {item.quantity}</span>
+                        <span>{formatMoney(item.unitPrice * item.quantity)}</span>
+                      </div>
+                    ))}
+                    <p className="text-center text-sm font-black text-slate-600">
+                      {t.backupQrForCounter}
+                    </p>
+                    <div className="grid aspect-square place-items-center rounded-2xl bg-slate-50 p-4">
+                      <div className="grid h-full w-full grid-cols-7 grid-rows-7 gap-1">
+                        {Array.from({ length: 49 }).map((_, index) => (
+                          <span
+                            className={`rounded-sm ${
+                              qrBits(payload, index) ? "bg-club-black" : "bg-white"
+                            }`}
+                            key={index}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      className="h-24 rounded-xl border border-slate-200 bg-white p-2 text-[10px] font-bold"
+                      readOnly
+                      value={payload}
+                    />
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function OrderComplete({
   onBack,
+  onOrderLog,
   order,
   staffName,
   table,
 }: {
   onBack: () => void;
+  onOrderLog: () => void;
   order: Order;
   staffName: string;
   table: Table;
@@ -484,6 +625,7 @@ function OrderComplete({
   const language = useAppStore((state) => state.language);
   const t = getDictionary(language);
   const sessionTables = useTableStore((state) => state.tablesBySession[table.sessionId] ?? EMPTY_TABLES);
+  const payload = buildQrOrderPayload(order, table.id, staffName);
 
   return (
     <section className="relative grid min-h-[70vh] place-items-center rounded-3xl bg-white p-6 text-center shadow-sm">
@@ -504,12 +646,62 @@ function OrderComplete({
         <p className="mt-1 text-sm font-bold text-slate-500">
           {t.orderedBy}: {staffName}
         </p>
-        <Button className="mt-8" onClick={onBack}>
-          {t.backToTables}
-        </Button>
+        <div className="mx-auto mt-6 grid max-w-xs gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
+          <p className="text-center text-sm font-black text-slate-600">
+            {t.backupQrForCounter}
+          </p>
+          <div className="grid aspect-square place-items-center rounded-2xl bg-white p-4">
+            <div className="grid h-full w-full grid-cols-7 grid-rows-7 gap-1">
+              {Array.from({ length: 49 }).map((_, index) => (
+                <span
+                  className={`rounded-sm ${qrBits(payload, index) ? "bg-club-black" : "bg-slate-100"}`}
+                  key={index}
+                />
+              ))}
+            </div>
+          </div>
+          <textarea
+            className="h-20 rounded-xl border border-slate-200 bg-white p-2 text-[10px] font-bold"
+            readOnly
+            value={payload}
+          />
+        </div>
+        <div className="mt-8 grid gap-3 sm:grid-cols-2">
+          <Button onClick={onBack}>{t.backToTables}</Button>
+          <Button onClick={onOrderLog} variant="secondary">
+            {t.orderLog}
+          </Button>
+        </div>
       </div>
     </section>
   );
+}
+
+function buildQrOrderPayload(order: Order, tableId: string, staffName: string) {
+  return JSON.stringify({
+    schemaVersion: 1,
+    sessionId: order.sessionId,
+    tableId,
+    visitId: order.visitId,
+    orderId: order.id,
+    idempotencyKey: `handy-${order.id}`,
+    staffName,
+    orderedAt: order.createdAt,
+    items: order.items.map((item) => ({
+      menuItemId: item.menuItemId,
+      menuName: item.menuName,
+      unitPrice: item.unitPrice,
+      quantity: item.quantity,
+    })),
+  });
+}
+
+function qrBits(payload: string, index: number) {
+  let hash = 0;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash = (hash * 31 + payload.charCodeAt(i) + index) % 9973;
+  }
+  return (hash + index * 13) % 3 === 0 || [0, 1, 7, 8, 5, 6, 35, 36, 42, 43, 40, 41].includes(index);
 }
 
 function QtyButton({
@@ -539,6 +731,19 @@ function formatMoney(value: number) {
     currency: "KRW",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function shortItemSummary(order: Order) {
+  return order.items.map((item) => `${item.menuName} x ${item.quantity}`).join(", ");
 }
 
 function getGroupBounds(tables: Table[]) {

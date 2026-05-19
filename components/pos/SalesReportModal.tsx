@@ -22,7 +22,9 @@ export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalP
   const loadPayments = usePaymentStore((state) => state.loadPayments);
   const payments = usePaymentStore((state) => state.paymentsBySession[sessionId] ?? EMPTY_PAYMENTS);
   const cancelPayment = usePaymentStore((state) => state.cancelPayment);
+  const restorePayment = usePaymentStore((state) => state.restorePayment);
   const [cancelTarget, setCancelTarget] = useState<Payment | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<Payment | null>(null);
   const totalSales = useMemo(
     () =>
       payments
@@ -42,7 +44,7 @@ export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalP
   return (
     <Modal
       bodyClassName="flex-1 overflow-hidden"
-      className="h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] p-6"
+      className="h-[94vh] max-h-[94vh] w-[calc(100vw-24px)] max-w-none p-6"
       onClose={onClose}
       open={open}
       title={t.salesReport}
@@ -113,7 +115,14 @@ export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalP
                       >
                         {t.cancelPayment}
                       </Button>
-                    ) : null}
+                    ) : (
+                      <Button
+                        className="min-h-0 bg-orange-500 px-4 py-2 text-white hover:bg-orange-400"
+                        onClick={() => setRestoreTarget(payment)}
+                      >
+                        {t.restorePayment}
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -141,6 +150,28 @@ export function SalesReportModal({ open, sessionId, onClose }: SalesReportModalP
               variant="danger"
             >
               {t.cancelPayment}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        onClose={() => setRestoreTarget(null)}
+        open={Boolean(restoreTarget)}
+        title={t.confirmRestorePaymentTitle}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm font-bold text-slate-600">{t.confirmRestorePaymentPrompt}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={() => setRestoreTarget(null)} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                if (restoreTarget) restorePayment(sessionId, restoreTarget.id);
+                setRestoreTarget(null);
+              }}
+            >
+              {t.restorePayment}
             </Button>
           </div>
         </div>

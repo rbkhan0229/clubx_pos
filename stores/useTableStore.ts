@@ -46,6 +46,18 @@ type TableState = {
 const storageKey = (sessionId: string) => `clubx-pos:tables:${sessionId}`;
 const mergeGroupKey = (sessionId: string) => `clubx-pos:table-merge-groups:${sessionId}`;
 
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    window.localStorage.removeItem(key);
+    return fallback;
+  }
+}
+
 function getSize(minCapacity: number, maxCapacity: number): TableSize {
   return Math.max(minCapacity, maxCapacity) <= 2 ? 1 : 2;
 }
@@ -175,10 +187,8 @@ export const useTableStore = create<TableState>((set, get) => ({
   loadTables: (sessionId) => {
     if (typeof window === "undefined") return;
 
-    const raw = window.localStorage.getItem(storageKey(sessionId));
-    const rawGroups = window.localStorage.getItem(mergeGroupKey(sessionId));
-    const tables = raw ? (JSON.parse(raw) as Table[]) : [];
-    const groups = rawGroups ? (JSON.parse(rawGroups) as TableMergeGroup[]) : [];
+    const tables = readJson<Table[]>(storageKey(sessionId), []);
+    const groups = readJson<TableMergeGroup[]>(mergeGroupKey(sessionId), []);
     set((state) => ({
       tablesBySession: {
         ...state.tablesBySession,
@@ -440,7 +450,7 @@ export const useTableStore = create<TableState>((set, get) => ({
     const tables = get().tablesBySession[sessionId] ?? [];
     return tables
       .filter((table) => group.tableIds.includes(table.id))
-      .every((table) => table.status === "empty");
+      .every((table) => table.status === "empty" || table.status === "cleaning" || table.status === "occupied");
   },
 }));
 

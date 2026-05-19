@@ -79,6 +79,7 @@ export type PartyCard = {
   reservationTime?: string;
   waitingOrder?: number;
   guests: Guest[];
+  guestCount?: number;
   tableCount: number;
   status: "waiting" | "seated" | "completed" | "overdue";
   sourceId?: string;
@@ -132,7 +133,6 @@ export type JoinRecord = {
   sourceTableLabel?: string;
   targetPreJoinOrderIds: string[];
   sourcePreJoinOrderIds?: string[];
-  afterJoinOrderIds: string[];
 };
 
 export type TimeAdjustmentLog = {

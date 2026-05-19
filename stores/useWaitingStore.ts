@@ -17,7 +17,13 @@ const waitingSitesKey = "clubx-pos:waiting-sites";
 function readSites() {
   if (typeof window === "undefined") return [];
   const raw = window.localStorage.getItem(waitingSitesKey);
-  return raw ? (JSON.parse(raw) as WaitingSite[]) : [];
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as WaitingSite[];
+  } catch {
+    window.localStorage.removeItem(waitingSitesKey);
+    return [];
+  }
 }
 
 function saveSites(sites: WaitingSite[]) {

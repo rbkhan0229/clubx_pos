@@ -20,6 +20,7 @@ type PaymentState = {
   loadPayments: (sessionId: string) => void;
   createPayment: (input: NewPaymentInput) => Payment;
   cancelPayment: (sessionId: string, paymentId: string) => void;
+  restorePayment: (sessionId: string, paymentId: string) => void;
   getPaymentsBySession: (sessionId: string) => Payment[];
   getPaymentsByVisit: (sessionId: string, visitId: string) => Payment[];
   calculateSessionSalesTotal: (sessionId: string) => number;
@@ -27,6 +28,18 @@ type PaymentState = {
 };
 
 const paymentKey = (sessionId: string) => `clubx-pos:payments:${sessionId}`;
+
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    window.localStorage.removeItem(key);
+    return fallback;
+  }
+}
 
 function savePayments(sessionId: string, payments: Payment[]) {
   if (typeof window === "undefined") return;
@@ -39,11 +52,10 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   loadPayments: (sessionId) => {
     if (typeof window === "undefined") return;
 
-    const rawPayments = window.localStorage.getItem(paymentKey(sessionId));
     set((state) => ({
       paymentsBySession: {
         ...state.paymentsBySession,
-        [sessionId]: rawPayments ? (JSON.parse(rawPayments) as Payment[]) : [],
+        [sessionId]: readJson<Payment[]>(paymentKey(sessionId), []),
       },
     }));
   },
@@ -75,6 +87,18 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   cancelPayment: (sessionId, paymentId) => {
     const next = (get().paymentsBySession[sessionId] ?? []).map((payment) =>
       payment.id === paymentId ? { ...payment, status: "cancelled" as const } : payment,
+    );
+    savePayments(sessionId, next);
+    set((state) => ({
+      paymentsBySession: {
+        ...state.paymentsBySession,
+        [sessionId]: next,
+      },
+    }));
+  },
+  restorePayment: (sessionId, paymentId) => {
+    const next = (get().paymentsBySession[sessionId] ?? []).map((payment) =>
+      payment.id === paymentId ? { ...payment, status: "paid" as const } : payment,
     );
     savePayments(sessionId, next);
     set((state) => ({

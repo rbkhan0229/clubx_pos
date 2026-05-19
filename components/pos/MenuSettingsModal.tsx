@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Lock, LockOpen, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
 import { getDictionary } from "@/lib/i18n/dictionaries";
@@ -24,6 +24,8 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
   const loadMenu = useMenuStore((state) => state.loadMenu);
   const categories = useMenuStore((state) => state.categoriesBySession[sessionId] ?? EMPTY_CATEGORIES);
   const items = useMenuStore((state) => state.itemsBySession[sessionId] ?? EMPTY_ITEMS);
+  const locked = useMenuStore((state) => state.lockedBySession[sessionId] ?? true);
+  const setMenuLocked = useMenuStore((state) => state.setMenuLocked);
   const addCategory = useMenuStore((state) => state.addCategory);
   const updateCategory = useMenuStore((state) => state.updateCategory);
   const deleteCategory = useMenuStore((state) => state.deleteCategory);
@@ -36,6 +38,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
     [categories],
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (open) loadMenu(sessionId);
@@ -59,17 +62,27 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
   return (
     <Modal
       bodyClassName="flex-1 overflow-hidden"
-      className="h-[88vh] max-h-[88vh] w-[94vw] max-w-[1500px] p-6"
+      className="h-[94vh] max-h-[94vh] w-[calc(100vw-24px)] max-w-none p-6"
       onClose={onClose}
       open={open}
       title={t.menuSettings}
     >
       <div className="grid h-full gap-5 overflow-y-auto pr-1">
         <section className="grid gap-3">
+          <div className="flex justify-end">
+            <Button
+              icon={locked ? <Lock size={17} /> : <LockOpen size={17} />}
+              onClick={() => (locked ? setUnlockConfirmOpen(true) : setMenuLocked(sessionId, true))}
+              variant="secondary"
+            >
+              {locked ? t.locked : t.unlocked}
+            </Button>
+          </div>
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-base font-black">{t.categories}</h3>
             <Button
               className="min-h-0 px-4 py-2"
+              disabled={locked}
               icon={<Plus size={17} />}
               onClick={() => {
                 const category = addCategory(sessionId, "");
@@ -115,6 +128,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
                       {t.categoryName}
                       <input
                         className="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold outline-none focus:border-club-green"
+                        disabled={locked}
                         onChange={(event) =>
                           updateCategory(category.id, { nameKo: event.target.value })
                         }
@@ -123,6 +137,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
                     </label>
                     <Button
                       className="self-end"
+                      disabled={locked}
                       icon={<Trash2 size={17} />}
                       onClick={() => deleteCategory(category.id)}
                       variant="danger"
@@ -142,6 +157,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
               <h3 className="text-base font-black">{t.menuItems}</h3>
               <Button
                 className="min-h-0 px-4 py-2"
+                disabled={locked}
                 icon={<Plus size={17} />}
                 onClick={() => addMenuItem(sessionId, activeCategoryId)}
               >
@@ -169,6 +185,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
                           {t.menuName}
                           <input
                             className="touch-target rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-club-green"
+                            disabled={locked}
                             onChange={(event) =>
                               updateMenuItem(item.id, { nameKo: event.target.value })
                             }
@@ -179,6 +196,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
                           {t.price}
                           <input
                             className="touch-target rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-club-green"
+                            disabled={locked}
                             min={0}
                             onChange={(event) =>
                               updateMenuItem(item.id, {
@@ -191,6 +209,7 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
                         </label>
                         <Button
                           className="self-end"
+                          disabled={locked}
                           icon={<Trash2 size={17} />}
                           onClick={() => deleteMenuItem(item.id)}
                           variant="secondary"
@@ -216,6 +235,28 @@ export function MenuSettingsModal({ open, sessionId, onClose }: MenuSettingsModa
           </section>
         ) : null}
       </div>
+      <Modal
+        onClose={() => setUnlockConfirmOpen(false)}
+        open={unlockConfirmOpen}
+        title={t.unlockMenuSettings}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm font-bold text-slate-600">{t.unlockMenuSettingsPrompt}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button onClick={() => setUnlockConfirmOpen(false)} variant="secondary">
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                setMenuLocked(sessionId, false);
+                setUnlockConfirmOpen(false);
+              }}
+            >
+              {t.unlock}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }

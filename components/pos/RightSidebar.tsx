@@ -20,13 +20,15 @@ import { useReservationStore } from "@/stores/useReservationStore";
 import { useVisitStore } from "@/stores/useVisitStore";
 import { useWaitingStore } from "@/stores/useWaitingStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
+import { useTableStore } from "@/stores/useTableStore";
 import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
-import type { PartyCard, StaffDevice, WaitingSite } from "@/types";
+import type { PartyCard, StaffDevice, Table, WaitingSite } from "@/types";
 import type { SidebarTab } from "@/types";
 
 const EMPTY_PARTY_CARDS: PartyCard[] = [];
 const EMPTY_WAITING_SITES: WaitingSite[] = [];
+const EMPTY_TABLES: Table[] = [];
 
 const tabs: Array<{
   id: SidebarTab;
@@ -306,6 +308,8 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
     (state) => state.selectPartyCardForAssignment,
   );
   const loadVisits = useVisitStore((state) => state.loadVisits);
+  const tables = useTableStore((state) => state.tablesBySession[sessionId] ?? EMPTY_TABLES);
+  const getMergeGroupByTableId = useTableStore((state) => state.getMergeGroupByTableId);
   const rawPartyCards = useVisitStore((state) => state.partyCardsBySession[sessionId] ?? EMPTY_PARTY_CARDS);
   const toggleGuestCheckIn = useVisitStore((state) => state.toggleGuestCheckIn);
   const checkInAllGuests = useVisitStore((state) => state.checkInAllGuests);
@@ -410,9 +414,14 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
                               : `${t.reservationTime}: ${card.reservationTime} · ${t.tableCount}: ${card.tableCount}`}
                           </p>
                         </div>
-                        <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-club-ink">
-                          {partyCardStatusText(card, allChecked, t)}
-                        </span>
+                        <div className="grid justify-items-end gap-1">
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-club-ink">
+                            {mappedTableLabel(card, tables, getMergeGroupByTableId, sessionId, t)}
+                          </span>
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-club-ink">
+                            {partyCardStatusText(card, allChecked, t)}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="mt-3 grid gap-2">
@@ -442,7 +451,7 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
                                       : "bg-slate-100 text-slate-500"
                                   }`}
                                   onClick={() => toggleGuestCheckIn(sessionId, card.id, guest.id)}
-                                  title={guest.checkedIn ? t.checkedIn : t.notCheckedIn}
+                                  title={t.checkIn}
                                   type="button"
                                 >
                                   <Check size={17} />
@@ -465,7 +474,7 @@ function ReservationManagementPanel({ sessionId }: { sessionId: string }) {
                           onClick={() => checkInAllGuests(sessionId, card.id)}
                           variant="secondary"
                         >
-                          {t.checkAll}
+                          {t.checkInAll}
                         </Button>
                         <Button
                           className="min-h-0 px-3 py-2"
@@ -498,7 +507,7 @@ function HandyDevicePanel({ sessionId }: { sessionId: string }) {
   const rawCodes = useHandyStore((state) => state.activationCodesBySession[sessionId]);
   const rawDevices = useHandyStore((state) => state.devicesBySession[sessionId]);
   const [latestCode, setLatestCode] = useState("");
-  const [kickTarget, setKickTarget] = useState<StaffDevice | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StaffDevice | null>(null);
   const codes = Array.isArray(rawCodes) ? rawCodes : [];
   const devices = Array.isArray(rawDevices) ? rawDevices : [];
   const latestStoredCode = codes.length > 0 ? codes[codes.length - 1] : "";
@@ -559,7 +568,7 @@ function HandyDevicePanel({ sessionId }: { sessionId: string }) {
                   </div>
                   <Button
                     className="min-h-0 px-3 py-2"
-                    onClick={() => setKickTarget(device)}
+                    onClick={() => setDeleteTarget(device)}
                     variant="danger"
                   >
                     {t.kickDevice}
@@ -572,20 +581,20 @@ function HandyDevicePanel({ sessionId }: { sessionId: string }) {
       </div>
 
       <Modal
-        onClose={() => setKickTarget(null)}
-        open={Boolean(kickTarget)}
+        onClose={() => setDeleteTarget(null)}
+        open={Boolean(deleteTarget)}
         title={t.removeDeviceTitle}
       >
         <div className="grid gap-4">
           <p className="text-sm font-bold text-slate-600">{t.removeDevicePrompt}</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Button onClick={() => setKickTarget(null)} variant="secondary">
+            <Button onClick={() => setDeleteTarget(null)} variant="secondary">
               {t.cancel}
             </Button>
             <Button
               onClick={() => {
-                if (kickTarget) kickDevice(sessionId, kickTarget.id);
-                setKickTarget(null);
+                if (deleteTarget) kickDevice(sessionId, deleteTarget.id);
+                setDeleteTarget(null);
               }}
               variant="danger"
             >
@@ -627,6 +636,21 @@ function partyCardStatusText(
   if (card.status === "completed") return t.completed;
   if (allChecked) return t.checkedIn;
   return t.notCheckedIn;
+}
+
+function mappedTableLabel(
+  card: PartyCard,
+  tables: Array<{ id: string; number: string; mergedGroupId?: string }>,
+  getMergeGroupByTableId: (sessionId: string, tableId: string) => { label: string } | undefined,
+  sessionId: string,
+  t: ReturnType<typeof getDictionary>,
+) {
+  const tableId = card.mappedTableIds?.[0];
+  if (!tableId) return t.unassigned;
+  const group = getMergeGroupByTableId(sessionId, tableId);
+  if (group) return group.label;
+  const table = tables.find((item) => item.id === tableId);
+  return table ? (t.table === "Table" ? `Table ${table.number}` : `${table.number}번`) : t.unassigned;
 }
 
 function PlaceholderPanel({

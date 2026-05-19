@@ -7,7 +7,9 @@ import type { MenuCategory, MenuItem } from "@/types";
 type MenuState = {
   categoriesBySession: Record<string, MenuCategory[]>;
   itemsBySession: Record<string, MenuItem[]>;
+  lockedBySession: Record<string, boolean>;
   loadMenu: (sessionId: string) => void;
+  setMenuLocked: (sessionId: string, locked: boolean) => void;
   addCategory: (sessionId: string, nameKo?: string) => MenuCategory;
   updateCategory: (categoryId: string, updates: Partial<MenuCategory>) => void;
   deleteCategory: (categoryId: string) => void;
@@ -21,6 +23,19 @@ type MenuState = {
 
 const categoriesKey = (sessionId: string) => `clubx-pos:menu-categories:${sessionId}`;
 const itemsKey = (sessionId: string) => `clubx-pos:menu-items:${sessionId}`;
+const lockedKey = (sessionId: string) => `clubx-pos:menu-locked:${sessionId}`;
+
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    window.localStorage.removeItem(key);
+    return fallback;
+  }
+}
 
 function saveMenu(sessionId: string, categories: MenuCategory[], items: MenuItem[]) {
   if (typeof window === "undefined") return;
@@ -47,21 +62,36 @@ function findSessionForItem(itemsBySession: Record<string, MenuItem[]>, itemId: 
 export const useMenuStore = create<MenuState>((set, get) => ({
   categoriesBySession: {},
   itemsBySession: {},
+  lockedBySession: {},
   loadMenu: (sessionId) => {
     if (typeof window === "undefined") return;
 
-    const rawCategories = window.localStorage.getItem(categoriesKey(sessionId));
-    const rawItems = window.localStorage.getItem(itemsKey(sessionId));
     set((state) => ({
       categoriesBySession: {
         ...state.categoriesBySession,
-        [sessionId]: rawCategories ? (JSON.parse(rawCategories) as MenuCategory[]) : [],
+        [sessionId]: readJson<MenuCategory[]>(categoriesKey(sessionId), []),
       },
       itemsBySession: {
         ...state.itemsBySession,
-        [sessionId]: rawItems ? (JSON.parse(rawItems) as MenuItem[]) : [],
+        [sessionId]: readJson<MenuItem[]>(itemsKey(sessionId), []),
+      },
+      lockedBySession: {
+        ...state.lockedBySession,
+        [sessionId]: readJson<boolean>(lockedKey(sessionId), true),
       },
     }));
+  },
+  setMenuLocked: (sessionId, locked) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(lockedKey(sessionId), JSON.stringify(locked));
+    }
+    set((state) => ({
+      lockedBySession: {
+        ...state.lockedBySession,
+        [sessionId]: locked,
+      },
+    }));
+    broadcastClubxSync({ sessionId, store: "menu" });
   },
   addCategory: (sessionId, nameKo = "") => {
     const current = get().categoriesBySession[sessionId] ?? [];

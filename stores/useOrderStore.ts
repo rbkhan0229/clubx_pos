@@ -47,6 +47,18 @@ type OrderState = {
 
 const orderKey = (sessionId: string) => `clubx-pos:orders:${sessionId}`;
 
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    window.localStorage.removeItem(key);
+    return fallback;
+  }
+}
+
 function saveOrders(sessionId: string, orders: Order[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(orderKey(sessionId), JSON.stringify(orders));
@@ -71,17 +83,17 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   loadOrders: (sessionId) => {
     if (typeof window === "undefined") return;
 
-    const rawOrders = window.localStorage.getItem(orderKey(sessionId));
     set((state) => ({
       ordersBySession: {
         ...state.ordersBySession,
-        [sessionId]: rawOrders ? (JSON.parse(rawOrders) as Order[]) : [],
+        [sessionId]: readJson<Order[]>(orderKey(sessionId), []),
       },
     }));
   },
   createOrder: ({ sessionId, visitId, segmentId, orderedBy, items }) => {
     const current = get().ordersBySession[sessionId] ?? [];
     const now = new Date().toISOString();
+    // Store menuName and unitPrice as order-time snapshots so later menu edits do not rewrite history.
     const order: Order = {
       id: `order-${sessionId}-${Date.now()}`,
       sessionId,

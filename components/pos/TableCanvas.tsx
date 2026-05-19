@@ -7,7 +7,7 @@ import { useAppStore } from "@/stores/useAppStore";
 import { tableStatusLabel, useTableStore } from "@/stores/useTableStore";
 import { useVisitStore } from "@/stores/useVisitStore";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
-import type { Table, TableMergeGroup } from "@/types";
+import type { PartyCard, Table, TableMergeGroup, Visit } from "@/types";
 import type { TableModalState } from "@/components/pos/PosWorkspace";
 
 type TableCanvasProps = {
@@ -26,6 +26,8 @@ const tableSizeClass = {
 
 const EMPTY_TABLES: Table[] = [];
 const EMPTY_MERGE_GROUPS: TableMergeGroup[] = [];
+const EMPTY_VISITS: Visit[] = [];
+const EMPTY_PARTY_CARDS: PartyCard[] = [];
 
 const statusClass = {
   empty: "border-club-green bg-club-acid text-club-black",
@@ -54,6 +56,8 @@ export function TableCanvas({
   const selectedTableIds = useTableStore((state) => state.selectedTableIds);
   const mergeSelectedTableIds = useTableStore((state) => state.mergeSelectedTableIds);
   const getActiveVisitForTable = useVisitStore((state) => state.getActiveVisitForTable);
+  const visits = useVisitStore((state) => state.visitsBySession[sessionId] ?? EMPTY_VISITS);
+  const partyCards = useVisitStore((state) => state.partyCardsBySession[sessionId] ?? EMPTY_PARTY_CARDS);
   const tableEditMode = useWorkspaceStore((state) => state.tableEditMode);
   const tableMergeMode = useWorkspaceStore((state) => state.tableMergeMode);
   const tableEditLocked = useWorkspaceStore((state) => state.tableEditLocked);
@@ -221,6 +225,9 @@ export function TableCanvas({
           const duplicate = duplicateNumbers.has(table.number.trim());
           const activeVisit = getActiveVisitForTable(sessionId, table.id);
           const joined = Boolean(activeVisit?.isJoined || (activeVisit?.partyCardIds.length ?? 0) >= 2);
+          const remaining = activeVisit
+            ? calculateRemainingMinutesByPolicy(activeVisit, partyCards, visits, tables)
+            : null;
 
           return (
             <div
@@ -267,12 +274,63 @@ export function TableCanvas({
               <span className="text-xs font-bold opacity-80">
                 {table.minCapacity}-{table.maxCapacity}
               </span>
+              {table.status === "occupied" && remaining !== null ? (
+                <span
+                  className={cn(
+                    "rounded-full bg-white/90 px-2 py-1 text-xs font-black text-club-black",
+                    remaining <= 0 && "text-club-red",
+                    remaining > 0 && remaining <= 10 && "text-orange-500",
+                  )}
+                >
+                  {formatRemainingTime(remaining, language)}
+                </span>
+              ) : null}
             </div>
           );
         })}
       </div>
     </section>
   );
+}
+
+function calculateRemainingMinutesByPolicy(
+  visit: Visit,
+  partyCards: PartyCard[],
+  visits: Visit[],
+  tables: Table[],
+) {
+  const tableIds = new Set(visit.tableIds);
+  const isMerged = new Set(
+    tables
+      .filter((table) => tableIds.has(table.id) && table.mergedGroupId)
+      .map((table) => table.mergedGroupId),
+  ).size === 1 && visit.tableIds.length > 1;
+  const times = visit.partyCardIds
+    .map((partyCardId) => {
+      const card = partyCards.find((item) => item.id === partyCardId);
+      if (!card) return undefined;
+      const mappedVisit =
+        visits.find((item) => item.status === "active" && item.partyCardIds.includes(card.id)) ??
+        visits.find((item) => item.partyCardIds.includes(card.id));
+      return mappedVisit ? new Date(mappedVisit.expectedEndAt).getTime() : undefined;
+    })
+    .filter((time): time is number => typeof time === "number" && Number.isFinite(time));
+  const selected = times.length > 0
+    ? isMerged
+      ? Math.min(...times)
+      : Math.max(...times)
+    : new Date(visit.expectedEndAt).getTime();
+  return Math.ceil((selected - Date.now()) / 60_000);
+}
+
+function formatRemainingTime(minutes: number, language: "ko" | "en") {
+  if (minutes <= 0) return language === "ko" ? "시간 초과" : "Expired";
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
 }
 
 function getGroupBounds(tables: Table[]) {

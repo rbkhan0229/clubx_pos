@@ -31,12 +31,14 @@ type PosToolbarProps = {
   sessionId: string;
   onOpenMenuSettings: () => void;
   onOpenSalesReport: () => void;
+  onResetLocalData: () => void;
 };
 
 export function PosToolbar({
   sessionId,
   onOpenMenuSettings,
   onOpenSalesReport,
+  onResetLocalData,
 }: PosToolbarProps) {
   const router = useRouter();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -164,6 +166,20 @@ export function PosToolbar({
                     type="button"
                   >
                     {t.salesReport}
+                  </button>
+                  <div className="my-1 border-t border-slate-100" />
+                  <p className="px-3 pt-1 text-xs font-black uppercase tracking-[0.14em] text-slate-400">
+                    {t.developerTools}
+                  </p>
+                  <button
+                    className="min-h-11 rounded-xl px-3 py-2 text-left text-sm font-bold text-club-red hover:bg-red-50 active:bg-red-100"
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      onResetLocalData();
+                    }}
+                    type="button"
+                  >
+                    {t.resetLocalData}
                   </button>
                 </div>,
                 document.body,

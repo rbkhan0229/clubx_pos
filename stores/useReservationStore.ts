@@ -32,10 +32,18 @@ export const useReservationStore = create<ReservationState>((set) => ({
   loadReservationSource: (sessionId) => {
     if (typeof window === "undefined") return;
     const raw = window.localStorage.getItem(sourceKey(sessionId));
+    let source: ReservationSource | null = null;
+    if (raw) {
+      try {
+        source = JSON.parse(raw) as ReservationSource;
+      } catch {
+        window.localStorage.removeItem(sourceKey(sessionId));
+      }
+    }
     set((state) => ({
       sourcesBySession: {
         ...state.sourcesBySession,
-        [sessionId]: raw ? (JSON.parse(raw) as ReservationSource) : null,
+        [sessionId]: source,
       },
     }));
   },
