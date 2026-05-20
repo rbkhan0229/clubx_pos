@@ -9,3 +9,4 @@ data/*.csv
 *.reservation-export.json
 *.reservation-export.csv
 .vercel
+club-lms-for-kuba

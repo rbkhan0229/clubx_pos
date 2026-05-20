@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDownAZ, ArrowUpAZ, CalendarClock, LogOut, Plus, Settings } from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
@@ -27,10 +27,15 @@ export function DashboardClient() {
   const sortDirection = useAppStore((state) => state.sortDirection);
   const setSort = useAppStore((state) => state.setSort);
   const toggleSortDirection = useAppStore((state) => state.toggleSortDirection);
+  const loadSessions = useAppStore((state) => state.loadSessions);
   const addSession = useAppStore((state) => state.addSession);
   const clearMockLogin = useAppStore((state) => state.clearMockLogin);
   const touchSession = useAppStore((state) => state.touchSession);
   const t = getDictionary(language);
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
 
   const sortedSessions = useMemo(() => {
     return [...sessions].sort((a, b) => {

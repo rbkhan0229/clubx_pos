@@ -159,6 +159,7 @@ export function OrderPanel({
           <OrderPanelHome
             onAddOrder={() => setMode("addOrder")}
             onCancelItems={() => setMode("cancelItems")}
+            onClosePanel={closePanel}
             onEditOrder={(order) => setEditConfirmOrder(order)}
             onPay={() => setMode("payment")}
             onPrepay={() => setMode("prepayment")}
@@ -216,6 +217,7 @@ function modeTitle(mode: OrderPanelMode, t: ReturnType<typeof getDictionary>) {
 function OrderPanelHome({
   onAddOrder,
   onCancelItems,
+  onClosePanel,
   onEditOrder,
   onPay,
   onPrepay,
@@ -226,6 +228,7 @@ function OrderPanelHome({
 }: {
   onAddOrder: () => void;
   onCancelItems: () => void;
+  onClosePanel: () => void;
   onEditOrder: (order: Order) => void;
   onPay: () => void;
   onPrepay: () => void;
@@ -259,6 +262,10 @@ function OrderPanelHome({
   const tableLabel = getVisitTableLabel(activeVisit, sessionTables, table);
   const adjustVisitTime = useVisitStore((state) => state.adjustVisitTime);
   const createOrder = useOrderStore((state) => state.createOrder);
+  const unassignPartyCardsFromVisit = useVisitStore(
+    (state) => state.unassignPartyCardsFromVisit,
+  );
+  const updateTable = useTableStore((state) => state.updateTable);
   const partyCards = useVisitStore(
     (state) => state.partyCardsBySession[table.sessionId] ?? EMPTY_PARTY_CARDS,
   );
@@ -267,6 +274,7 @@ function OrderPanelHome({
   );
   const [moveWarningOpen, setMoveWarningOpen] = useState(false);
   const [moveWarningMessage, setMoveWarningMessage] = useState("");
+  const [unassignConfirmOpen, setUnassignConfirmOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrPayload, setQrPayload] = useState("");
   const [qrMessage, setQrMessage] = useState("");
@@ -337,12 +345,10 @@ function OrderPanelHome({
     [summary],
   );
   const hasPayableItems = total > 0;
-  const hasPreviousPayment = payments.some(
-    (payment) => payment.status === "paid" && payment.visitId === activeVisit.id,
-  );
-  const hasAnyOrderHistory = orders.length > 0;
-  const canPay = hasPayableItems || (hasPreviousPayment && hasAnyOrderHistory);
-  const isFinalCheckout = !hasPayableItems && hasPreviousPayment && hasAnyOrderHistory;
+  const hasOrderHistory = orders.some((order) => order.items.length > 0);
+  const hasAnyPaymentHistory = payments.some((payment) => payment.visitId === activeVisit.id);
+  const canPay = hasPayableItems || hasOrderHistory;
+  const isFinalCheckout = !hasPayableItems && hasOrderHistory;
   const mappedPartyCards = useMemo(
     () =>
       activeVisit.partyCardIds
@@ -441,6 +447,28 @@ function OrderPanelHome({
       sourceVisit: activeVisit,
       sourceLabel: tableLabel,
     });
+  }
+
+  const selectedPartyCards = mappedPartyCards.filter((partyCard) =>
+    selectedMovePartyCardIds.includes(partyCard.id),
+  );
+  const canUnassignSelectedPartyCards =
+    selectedPartyCards.length > 0 && !hasOrderHistory && !hasAnyPaymentHistory && total === 0;
+
+  function confirmUnassignPartyCards() {
+    if (!canUnassignSelectedPartyCards) return;
+    const result = unassignPartyCardsFromVisit(
+      table.sessionId,
+      activeVisit.id,
+      selectedPartyCards.map((partyCard) => partyCard.id),
+    );
+    setUnassignConfirmOpen(false);
+    setSelectedMovePartyCardIds([]);
+    if (!result) return;
+    if (result.emptied) {
+      activeVisit.tableIds.forEach((tableId) => updateTable(tableId, { status: "empty" }));
+      onClosePanel();
+    }
   }
 
   function mobileOrderPath() {
@@ -678,15 +706,49 @@ function OrderPanelHome({
             ))}
           </div>
           {onStartPartyCardMove ? (
-            <Button
-              className="mt-3 w-full"
-              disabled={selectedMovePartyCardIds.length === 0}
-              onClick={startPartyCardMove}
-              variant="secondary"
-            >
-              {t.moveJoinSelected}
-            </Button>
+            <div className="mt-3 grid gap-2">
+              <Button
+                className="w-full"
+                disabled={selectedMovePartyCardIds.length === 0}
+                onClick={startPartyCardMove}
+                variant="secondary"
+              >
+                {t.moveJoinSelected}
+              </Button>
+              <Button
+                className="w-full"
+                disabled={!canUnassignSelectedPartyCards}
+                onClick={() => setUnassignConfirmOpen(true)}
+                variant="secondary"
+              >
+                {t.unassignSelectedPartyCard}
+              </Button>
+              {selectedMovePartyCardIds.length > 0 && !canUnassignSelectedPartyCards ? (
+                <p className="rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-800">
+                  {t.unassignBeforeOrdersWarning}
+                </p>
+              ) : null}
+            </div>
           ) : null}
+          <Modal
+            onClose={() => setUnassignConfirmOpen(false)}
+            open={unassignConfirmOpen}
+            title={t.confirmUnassignPartyCardTitle}
+          >
+            <div className="grid gap-4">
+              <p className="text-sm font-bold text-slate-600">
+                {t.confirmUnassignPartyCardPrompt}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button onClick={() => setUnassignConfirmOpen(false)} variant="secondary">
+                  {t.cancel}
+                </Button>
+                <Button onClick={confirmUnassignPartyCards}>
+                  {t.unassignSelectedPartyCard}
+                </Button>
+              </div>
+            </div>
+          </Modal>
           <Modal
             onClose={() => setMoveWarningOpen(false)}
             open={moveWarningOpen}
@@ -1274,9 +1336,6 @@ function PaymentView({
   const allOrders = useOrderStore(
     (state) => state.ordersBySession[table.sessionId] ?? EMPTY_ORDERS,
   );
-  const payments = usePaymentStore(
-    (state) => state.paymentsBySession[table.sessionId] ?? EMPTY_PAYMENTS,
-  );
   const markPayableItemsPaid = useOrderStore((state) => state.markPayableItemsPaid);
   const createPayment = usePaymentStore((state) => state.createPayment);
   const updateTable = useTableStore((state) => state.updateTable);
@@ -1295,10 +1354,8 @@ function PaymentView({
   const totalAmount = paymentItems.reduce((sum, row) => sum + row.amount, 0);
   const discountAmount = rows.reduce((sum, row) => sum + row.discountAmount, 0);
   const perPersonAmount = Math.floor(totalAmount / Math.max(1, peopleCount));
-  const hasPreviousPayment = payments.some(
-    (payment) => payment.visitId === visit.id && payment.status === "paid",
-  );
-  const isCheckoutOnly = !isPrepaid && totalAmount === 0 && hasPreviousPayment && orders.length > 0;
+  const hasOrderHistory = orders.some((order) => order.items.length > 0);
+  const isCheckoutOnly = !isPrepaid && totalAmount === 0 && hasOrderHistory;
   const tableLabel = getVisitTableLabel(visit, sessionTables, table);
 
   function updatePeopleCount(value: string) {
@@ -1366,7 +1423,7 @@ function PaymentView({
               {t.totalAmount}: {formatMoney(0)}
             </p>
             <p>
-              {t.discountAmount}: {formatMoney(0)}
+              {t.discountAmount}: {formatMoney(discountAmount)}
             </p>
           </div>
         </section>

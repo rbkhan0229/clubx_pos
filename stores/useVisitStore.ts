@@ -51,6 +51,11 @@ type VisitState = {
   adjustVisitTime: (sessionId: string, visitId: string, minutes: number) => void;
   updateVisitStatus: (sessionId: string, visitId: string, status: Visit["status"]) => void;
   updateVisitTableIds: (sessionId: string, visitId: string, tableIds: string[]) => void;
+  unassignPartyCardsFromVisit: (
+    sessionId: string,
+    visitId: string,
+    partyCardIds: string[],
+  ) => { visit: Visit; emptied: boolean } | undefined;
   completeVisitsForTable: (sessionId: string, tableId: string) => void;
 };
 
@@ -587,6 +592,81 @@ export const useVisitStore = create<VisitState>((set, get) => ({
         [sessionId]: nextVisits,
       },
     }));
+  },
+  unassignPartyCardsFromVisit: (sessionId, visitId, partyCardIds) => {
+    const currentPartyCards = get().partyCardsBySession[sessionId] ?? [];
+    const currentVisits = get().visitsBySession[sessionId] ?? [];
+    const targetVisit = currentVisits.find(
+      (visit) => visit.id === visitId && visit.status === "active",
+    );
+    if (!targetVisit) return undefined;
+
+    const unassignIds = new Set(partyCardIds);
+    const selectedIds = targetVisit.partyCardIds.filter((partyCardId) =>
+      unassignIds.has(partyCardId),
+    );
+    if (selectedIds.length === 0) return undefined;
+
+    const remainingPartyCardIds = targetVisit.partyCardIds.filter(
+      (partyCardId) => !unassignIds.has(partyCardId),
+    );
+    const remainingPartyCard = currentPartyCards.find(
+      (card) => card.id === remainingPartyCardIds[0],
+    );
+    const emptied = remainingPartyCardIds.length === 0;
+    let updatedVisit: Visit | undefined;
+
+    const nextVisits = currentVisits.map((visit) => {
+      if (visit.id !== visitId) return visit;
+      updatedVisit = {
+        ...visit,
+        partyCardIds: remainingPartyCardIds,
+        sourceType: emptied
+          ? visit.sourceType
+          : remainingPartyCardIds.length >= 2
+            ? "joined"
+            : remainingPartyCard?.type ?? visit.sourceType,
+        sourceId: emptied ? undefined : remainingPartyCardIds[0],
+        status: emptied ? "completed" : "active",
+        isJoined: remainingPartyCardIds.length >= 2,
+        joinedAt: remainingPartyCardIds.length >= 2 ? visit.joinedAt : undefined,
+      };
+      return updatedVisit;
+    });
+
+    if (!updatedVisit) return undefined;
+
+    const remainingIds = new Set(remainingPartyCardIds);
+    const nextPartyCards = currentPartyCards.map((card) => {
+      if (unassignIds.has(card.id)) {
+        return {
+          ...card,
+          status: "waiting" as const,
+          mappedTableIds: [],
+        };
+      }
+      if (remainingIds.has(card.id)) {
+        return {
+          ...card,
+          mappedTableIds: targetVisit.tableIds,
+        };
+      }
+      return card;
+    });
+
+    saveVisitState(sessionId, nextPartyCards, nextVisits, get().timeLogsByVisit);
+    set((state) => ({
+      partyCardsBySession: {
+        ...state.partyCardsBySession,
+        [sessionId]: nextPartyCards,
+      },
+      visitsBySession: {
+        ...state.visitsBySession,
+        [sessionId]: nextVisits,
+      },
+    }));
+
+    return { visit: updatedVisit, emptied };
   },
   completeVisitsForTable: (sessionId, tableId) => {
     const visits = get().visitsBySession[sessionId] ?? [];
