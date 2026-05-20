@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronDown, ChevronUp, Minus, Plus, RefreshCcw, Search, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronUp, Minus, Plus, RefreshCcw, Search, Trash2, XCircle } from "lucide-react";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { api } from "@/lib/api/client";
@@ -12,6 +12,33 @@ import { formatKstFullDateTime } from "@/lib/utils/datetime";
 type ViewMode = "time" | "recent";
 type StatusFilter = "all" | "active" | "cancelled" | "deleted";
 
+const SLOT_MINUTES = 30;
+const ARRIVED_STORAGE_KEY = "pub-reservation-arrived-v1";
+
+function loadArrivedSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(ARRIVED_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveArrivedSet(set: Set<string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ARRIVED_STORAGE_KEY, JSON.stringify([...set]));
+}
+
+function formatMinuteLabel(minutes: number) {
+  const wrapped = ((minutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hh = Math.floor(wrapped / 60).toString().padStart(2, "0");
+  const mm = (wrapped % 60).toString().padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 export default function CounterReservationsPage() {
   const [reservations, setReservations] = useState<AdminReservation[]>([]);
   const [query, setQuery] = useState("");
@@ -20,6 +47,21 @@ export default function CounterReservationsPage() {
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [arrivedIds, setArrivedIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setArrivedIds(loadArrivedSet());
+  }, []);
+
+  function toggleArrived(id: string) {
+    setArrivedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveArrivedSet(next);
+      return next;
+    });
+  }
 
   async function loadReservations() {
     setLoading(true);
@@ -64,11 +106,23 @@ export default function CounterReservationsPage() {
   }, [query, reservations, statusFilter, viewMode]);
 
   const grouped = useMemo(() => {
-    return filtered.reduce<Record<string, AdminReservation[]>>((next, reservation) => {
-      const key = `${reservation.start_label}-${reservation.end_label}`;
-      next[key] = [...(next[key] ?? []), reservation];
-      return next;
-    }, {});
+    if (!filtered.length) return [] as Array<[string, AdminReservation[]]>;
+    let minStart = Number.POSITIVE_INFINITY;
+    let maxEnd = Number.NEGATIVE_INFINITY;
+    for (const reservation of filtered) {
+      if (reservation.start_minute < minStart) minStart = reservation.start_minute;
+      if (reservation.end_minute > maxEnd) maxEnd = reservation.end_minute;
+    }
+    const buckets: Array<[string, AdminReservation[]]> = [];
+    for (let slot = minStart; slot < maxEnd; slot += SLOT_MINUTES) {
+      const slotEnd = slot + SLOT_MINUTES;
+      const items = filtered
+        .filter((reservation) => reservation.start_minute < slotEnd && reservation.end_minute > slot)
+        .sort((a, b) => a.start_minute - b.start_minute || b.created_at.localeCompare(a.created_at));
+      if (!items.length) continue;
+      buckets.push([`${formatMinuteLabel(slot)}-${formatMinuteLabel(slotEnd)}`, items]);
+    }
+    return buckets;
   }, [filtered]);
 
   async function mutateReservation(action: () => Promise<unknown>) {
@@ -87,7 +141,8 @@ export default function CounterReservationsPage() {
     );
   }
 
-  const groups = viewMode === "time" ? Object.entries(grouped) : [["최근순", filtered] as const];
+  const groups: Array<readonly [string, AdminReservation[]]> =
+    viewMode === "time" ? grouped : [["최근순", filtered] as const];
 
   return (
     <AppShell>
@@ -159,16 +214,27 @@ export default function CounterReservationsPage() {
             {items.map((reservation) => {
               const expanded = expandedIds.includes(reservation.id);
               const phone = reservation.contact_phone || reservation.contact_phone_masked || "-";
+              const arrived = arrivedIds.has(reservation.id);
               return (
-                <article className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm" key={reservation.id}>
+                <article
+                  className={`rounded-3xl border p-4 shadow-sm ${arrived ? "border-club-green bg-club-green/10" : "border-slate-200 bg-white"}`}
+                  key={`${group}-${reservation.id}`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-xl font-black">{reservation.reservation_code}</p>
+                      <p className="text-xl font-black">
+                        {reservation.reservation_code}
+                        {arrived ? (
+                          <span className="ml-2 rounded-full bg-club-green px-2 py-0.5 text-xs font-black text-white">
+                            도착
+                          </span>
+                        ) : null}
+                      </p>
                       <p className="mt-1 text-sm font-bold text-slate-600">
                         {reservation.contact_name} · {phone}
                       </p>
                       <p className="mt-1 text-xs font-bold text-slate-500">
-                        {reservation.start_label}-{reservation.end_label} · {reservation.total_party_size}명 · {reservation.table_count}테이블
+                        {formatServiceDate(reservation.service_date)} · {reservation.start_label}-{reservation.end_label} · {reservation.total_party_size}명 · {reservation.table_count}테이블
                       </p>
                       <p className="mt-1 text-xs font-bold text-slate-500">
                         {formatKstFullDateTime(reservation.created_at)} KST
@@ -180,6 +246,14 @@ export default function CounterReservationsPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      className="min-h-0 px-3 py-2"
+                      icon={<Check size={16} />}
+                      onClick={() => toggleArrived(reservation.id)}
+                      variant={arrived ? "primary" : "secondary"}
+                    >
+                      {arrived ? "도착 취소" : "도착 체크"}
+                    </Button>
                     <Button className="min-h-0 px-3 py-2" onClick={() => toggleExpanded(reservation.id)} variant="secondary">
                       {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       guests
@@ -263,4 +337,12 @@ export default function CounterReservationsPage() {
 function normalizeReservationList(response: AdminReservationListResponse | AdminReservation[]) {
   if (Array.isArray(response)) return response;
   return response.data ?? response.items ?? response.reservations ?? [];
+}
+
+function formatServiceDate(value?: string | null) {
+  if (!value) return "-";
+  // service_date arrives as "YYYY-MM-DD"; render as "MMDD" to match the lookup requirement.
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (match) return `${match[2]}${match[3]}`;
+  return value;
 }
