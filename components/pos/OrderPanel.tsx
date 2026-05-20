@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, ExternalLink, Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { Modal } from "@/components/common/Modal";
 import { printOrderSlip } from "@/lib/mock/printOrderSlip";
@@ -279,7 +279,6 @@ function OrderPanelHome({
   const [qrPayload, setQrPayload] = useState("");
   const [qrMessage, setQrMessage] = useState("");
   const [qrScanning, setQrScanning] = useState(false);
-  const [mobileOrderMessage, setMobileOrderMessage] = useState("");
   const qrVideoRef = useRef<HTMLVideoElement | null>(null);
   const [selectedMovePartyCardIds, setSelectedMovePartyCardIds] = useState<string[]>([]);
   const orders = useMemo(
@@ -471,24 +470,6 @@ function OrderPanelHome({
     }
   }
 
-  function mobileOrderPath() {
-    return `/mobile-order/${table.sessionId}/${activeVisit.id}`;
-  }
-
-  async function copyMobileOrderLink() {
-    const link = `${window.location.origin}${mobileOrderPath()}`;
-    try {
-      await navigator.clipboard.writeText(link);
-      setMobileOrderMessage("모바일 주문 링크를 복사했습니다.");
-    } catch {
-      setMobileOrderMessage(link);
-    }
-  }
-
-  function openMobileOrderPage() {
-    window.open(mobileOrderPath(), "_blank", "noopener,noreferrer");
-  }
-
   return (
     <div className="grid gap-4">
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -583,32 +564,6 @@ function OrderPanelHome({
             <Button className="px-3 py-2 text-xs" onClick={() => setQrOpen(true)} variant="secondary">
               {t.registerQrOrder}
             </Button>
-          </div>
-          <div className="mb-3 grid gap-2 rounded-2xl border border-club-green/20 bg-lime-50 p-3">
-            <p className="text-xs font-black uppercase text-club-green">Mobile Order</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button
-                className="min-h-0 px-3 py-2 text-xs"
-                icon={<Copy size={15} />}
-                onClick={copyMobileOrderLink}
-                variant="secondary"
-              >
-                모바일 주문 링크 복사
-              </Button>
-              <Button
-                className="min-h-0 px-3 py-2 text-xs"
-                icon={<ExternalLink size={15} />}
-                onClick={openMobileOrderPage}
-                variant="secondary"
-              >
-                주문 페이지 열기
-              </Button>
-            </div>
-            {mobileOrderMessage ? (
-              <p className="break-all rounded-xl bg-white p-2 text-xs font-bold text-slate-600">
-                {mobileOrderMessage}
-              </p>
-            ) : null}
           </div>
           <div className="grid gap-2">
             {orders.map((order) => (

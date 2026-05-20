@@ -213,7 +213,6 @@ export type SidebarTab =
   | "reservation"
   | "waiting"
   | "reservationSource"
-  | "handyDevice"
-  | "mobileOrders";
+  | "handyDevice";
 
 export type TableEditMode = "idle" | "add" | "move" | "delete" | "number";
