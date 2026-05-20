@@ -34,7 +34,7 @@ export function mapPosSessionDtoToBusinessSession(dto: PosBusinessSessionDto): B
     id: dto.id,
     name: dto.name,
     createdAt: dto.created_at ?? dto.opened_at,
-    lastAccessedAt: null,
+    lastAccessedAt: dto.last_accessed_at ?? dto.updated_at ?? null,
   };
 }
 

@@ -121,3 +121,45 @@ Phase 13C should migrate stores gradually:
 8. QR fallback server mode
 
 Do not migrate all stores in one change. Each store should have local mode QA and server mode QA before the next store moves.
+
+## Phase 13C-1: Business Sessions
+
+Business sessions now use the POS repository layer from the dashboard store.
+
+Local mode remains the default:
+
+```txt
+NEXT_PUBLIC_POS_DATA_MODE=local
+```
+
+or when `NEXT_PUBLIC_POS_DATA_MODE` is missing. In local mode, dashboard sessions still use the existing localStorage key:
+
+```txt
+clubx-pos:sessions
+```
+
+This means sessions persist only in the same browser/device. Local mode does not share sessions across devices.
+
+Server mode:
+
+```txt
+NEXT_PUBLIC_POS_DATA_MODE=server
+```
+
+uses `getPosRepositories().sessions` for dashboard session operations:
+
+- `list()` loads POS business sessions from the backend.
+- `create({ name })` creates a backend `PosBusinessSession`.
+- `close(sessionId)` is used for Dashboard delete behavior.
+- duplicate creates a shell session with `"{source name} Copy"` only.
+
+Multi-device session sharing works only when all of these are true:
+
+- `NEXT_PUBLIC_POS_DATA_MODE=server`
+- the backend is running with the POS migration applied
+- frontend API base/proxy points to that backend
+- all devices use the same backend
+
+In server mode, deleting a Dashboard session is implemented as close/archive on the backend and then removed from the visible Dashboard list. Deep duplication of tables, orders, visits, and payments is intentionally not implemented yet.
+
+The next migration step is Phase 13C-2: Tables / Merge Groups server mode.

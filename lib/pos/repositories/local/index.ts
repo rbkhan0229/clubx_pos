@@ -106,6 +106,7 @@ export const localPosRepositories: PosRepositories = {
       const session =
         readSessions().find((item) => item.id === sessionId) ??
         ({ id: sessionId, name: sessionId, createdAt: nowIso(), lastAccessedAt: nowIso() } satisfies BusinessSession);
+      writeSessions(readSessions().filter((item) => item.id !== sessionId));
       return session;
     },
   },

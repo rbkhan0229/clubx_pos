@@ -60,7 +60,7 @@ export function SessionCard({ session, onOpen }: SessionCardProps) {
                 className="flex min-h-11 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-bold text-club-ink hover:bg-lime-50 active:bg-club-acid/30"
                 onClick={(event) => {
                   event.stopPropagation();
-                  duplicateSession(session.id);
+                  void duplicateSession(session.id).catch(() => undefined);
                   setMenuOpen(false);
                 }}
                 type="button"
@@ -72,7 +72,7 @@ export function SessionCard({ session, onOpen }: SessionCardProps) {
                 className="flex min-h-11 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-bold text-club-red hover:bg-club-red/10 active:bg-club-red/20"
                 onClick={(event) => {
                   event.stopPropagation();
-                  deleteSession(session.id);
+                  void deleteSession(session.id).catch(() => undefined);
                   setMenuOpen(false);
                 }}
                 type="button"

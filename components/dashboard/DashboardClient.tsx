@@ -9,6 +9,7 @@ import { Input } from "@/components/common/Input";
 import { Modal } from "@/components/common/Modal";
 import { SessionCard } from "@/components/dashboard/SessionCard";
 import { getDictionary } from "@/lib/i18n/dictionaries";
+import { getPosRepositoryMode } from "@/lib/pos/repositories";
 import { useAppStore } from "@/stores/useAppStore";
 import type { BusinessSession, SortKey } from "@/types";
 
@@ -23,6 +24,8 @@ export function DashboardClient() {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const language = useAppStore((state) => state.language);
   const sessions = useAppStore((state) => state.sessions);
+  const sessionsLoading = useAppStore((state) => state.sessionsLoading);
+  const sessionsError = useAppStore((state) => state.sessionsError);
   const sortKey = useAppStore((state) => state.sortKey);
   const sortDirection = useAppStore((state) => state.sortDirection);
   const setSort = useAppStore((state) => state.setSort);
@@ -32,9 +35,10 @@ export function DashboardClient() {
   const clearMockLogin = useAppStore((state) => state.clearMockLogin);
   const touchSession = useAppStore((state) => state.touchSession);
   const t = getDictionary(language);
+  const dataMode = getPosRepositoryMode();
 
   useEffect(() => {
-    loadSessions();
+    void loadSessions();
   }, [loadSessions]);
 
   const sortedSessions = useMemo(() => {
@@ -46,19 +50,23 @@ export function DashboardClient() {
     });
   }, [sessions, sortDirection, sortKey]);
 
-  function handleCreate(event: FormEvent<HTMLFormElement>) {
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const name = String(form.get("sessionName") ?? "").trim();
     if (!name) return;
 
-    addSession(name);
-    setModalOpen(false);
-    event.currentTarget.reset();
+    try {
+      await addSession(name);
+      setModalOpen(false);
+      event.currentTarget.reset();
+    } catch {
+      // The store exposes the friendly failure state above the session list.
+    }
   }
 
   function openSession(id: string) {
-    touchSession(id);
+    void touchSession(id);
     router.push(`/counter/session/${id}`);
   }
 
@@ -78,6 +86,9 @@ export function DashboardClient() {
           <h1 className="text-3xl font-black sm:text-5xl">{t.dashboard}</h1>
           <p className="mt-3 max-w-2xl text-base font-semibold text-slate-600">
             {t.dashboardSubtitle}
+          </p>
+          <p className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">
+            {t.posDataMode}: {dataMode}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -107,6 +118,18 @@ export function DashboardClient() {
           </Button>
         </div>
       </section>
+
+      {sessionsError ? (
+        <section className="mb-5 flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p>{t.failedLoadServerSessions}</p>
+            <p className="mt-1 text-xs text-red-600">{sessionsError}</p>
+          </div>
+          <Button onClick={() => void loadSessions()} variant="secondary">
+            {t.retry}
+          </Button>
+        </section>
+      ) : null}
 
       <section className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center">
         <span className="text-sm font-black text-slate-600">{t.sortBy}</span>
@@ -139,11 +162,17 @@ export function DashboardClient() {
         </Button>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {sortedSessions.map((session) => (
-          <SessionCard key={session.id} onOpen={openSession} session={session} />
-        ))}
-      </section>
+      {sessionsLoading ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-500">
+          {t.loadingSessions}
+        </section>
+      ) : (
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {sortedSessions.map((session) => (
+            <SessionCard key={session.id} onOpen={openSession} session={session} />
+          ))}
+        </section>
+      )}
 
       <Modal
         onClose={() => setModalOpen(false)}

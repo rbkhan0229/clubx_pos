@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { mockBusinessSessions } from "@/lib/mock/sessions";
+import { getPosRepositories, getPosRepositoryMode } from "@/lib/pos/repositories";
 import type {
   BusinessSession,
   Language,
@@ -16,57 +17,39 @@ type AppState = {
     connectedName?: string;
   };
   sessions: BusinessSession[];
-  loadSessions: () => void;
+  sessionsLoading: boolean;
+  sessionsError: string | null;
+  loadSessions: () => Promise<void>;
   sortKey: SortKey;
   sortDirection: SortDirection;
   setLanguage: (language: Language) => void;
   setMockLogin: (mode: "counter" | "handy", connectedName?: string) => void;
   clearMockLogin: () => void;
-  addSession: (name: string) => BusinessSession;
-  deleteSession: (id: string) => void;
-  duplicateSession: (id: string) => void;
-  touchSession: (id: string) => void;
+  addSession: (name: string) => Promise<BusinessSession>;
+  deleteSession: (id: string) => Promise<void>;
+  duplicateSession: (id: string) => Promise<void>;
+  touchSession: (id: string) => Promise<void>;
   setSort: (sortKey: SortKey) => void;
   toggleSortDirection: () => void;
 };
 
-const idFromName = (name: string) =>
-  `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-${Date.now()}`;
-
-const sessionStorageKey = "clubx-pos:sessions";
-
-function isBusinessSession(value: unknown): value is BusinessSession {
-  if (!value || typeof value !== "object") return false;
-  const session = value as Partial<BusinessSession>;
-  return (
-    typeof session.id === "string" &&
-    typeof session.name === "string" &&
-    typeof session.createdAt === "string" &&
-    (session.lastAccessedAt === null ||
-      session.lastAccessedAt === undefined ||
-      typeof session.lastAccessedAt === "string")
-  );
+function sessionFailureMessage() {
+  return "Failed to load server sessions.";
 }
 
-function readStoredSessions(): BusinessSession[] | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(sessionStorageKey);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed.filter(isBusinessSession).map((session) => ({
-      ...session,
-      lastAccessedAt: session.lastAccessedAt ?? null,
-    }));
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSessions(sessions: BusinessSession[]) {
+function writeLocalSessions(sessions: BusinessSession[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
+  window.localStorage.setItem("clubx-pos:sessions", JSON.stringify(sessions));
+}
+
+function setSessionFailure(
+  set: (partial: Partial<AppState>) => void,
+  error: unknown,
+) {
+  set({
+    sessionsLoading: false,
+    sessionsError: error instanceof Error ? error.message : sessionFailureMessage(),
+  });
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -75,59 +58,92 @@ export const useAppStore = create<AppState>((set, get) => ({
     mode: null,
   },
   sessions: mockBusinessSessions,
-  loadSessions: () => {
-    const storedSessions = readStoredSessions();
-    const sessions = storedSessions ?? mockBusinessSessions;
-    if (!storedSessions) writeStoredSessions(sessions);
-    set({ sessions });
+  sessionsLoading: false,
+  sessionsError: null,
+  loadSessions: async () => {
+    const mode = getPosRepositoryMode();
+    const repositories = getPosRepositories();
+    set({ sessionsLoading: mode === "server", sessionsError: null });
+    try {
+      const sessions = await repositories.sessions.list();
+      set({ sessions, sessionsLoading: false, sessionsError: null });
+    } catch (error) {
+      setSessionFailure(set, error);
+    }
   },
   sortKey: "createdAt",
   sortDirection: "desc",
   setLanguage: (language) => set({ language }),
   setMockLogin: (mode, connectedName) => set({ mockLogin: { mode, connectedName } }),
   clearMockLogin: () => set({ mockLogin: { mode: null } }),
-  addSession: (name) => {
-    const now = new Date().toISOString();
-    const session: BusinessSession = {
-      id: idFromName(name),
-      name,
-      createdAt: now,
-      lastAccessedAt: null,
-    };
-
-    const nextSessions = [session, ...get().sessions];
-    writeStoredSessions(nextSessions);
-    set({ sessions: nextSessions });
-    return session;
+  addSession: async (name) => {
+    const mode = getPosRepositoryMode();
+    const repositories = getPosRepositories();
+    set({ sessionsLoading: mode === "server", sessionsError: null });
+    try {
+      const session = await repositories.sessions.create({ name });
+      set((state) => ({
+        sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
+        sessionsLoading: false,
+        sessionsError: null,
+      }));
+      return session;
+    } catch (error) {
+      setSessionFailure(set, error);
+      throw error;
+    }
   },
-  deleteSession: (id) => {
-    const nextSessions = get().sessions.filter((session) => session.id !== id);
-    writeStoredSessions(nextSessions);
-    set({ sessions: nextSessions });
+  deleteSession: async (id) => {
+    const mode = getPosRepositoryMode();
+    const repositories = getPosRepositories();
+    set({ sessionsLoading: mode === "server", sessionsError: null });
+    try {
+      // Server mode delete is implemented as close/archive.
+      await repositories.sessions.close(id);
+      set((state) => ({
+        sessions: state.sessions.filter((session) => session.id !== id),
+        sessionsLoading: false,
+        sessionsError: null,
+      }));
+    } catch (error) {
+      setSessionFailure(set, error);
+      throw error;
+    }
   },
-  duplicateSession: (id) => {
-    const source = get().sessions.find((session) => session.id === id);
-    if (!source) return;
-
-    const now = new Date().toISOString();
-    const copy: BusinessSession = {
-      id: idFromName(source.name),
-      name: `${source.name} Copy`,
-      createdAt: now,
-      lastAccessedAt: null,
-    };
-
-    const nextSessions = [copy, ...get().sessions];
-    writeStoredSessions(nextSessions);
-    set({ sessions: nextSessions });
+  duplicateSession: async (id) => {
+    const mode = getPosRepositoryMode();
+    const repositories = getPosRepositories();
+    set({ sessionsLoading: mode === "server", sessionsError: null });
+    try {
+      const source =
+        get().sessions.find((session) => session.id === id) ??
+        (await repositories.sessions.get(id));
+      if (!source) {
+        set({ sessionsLoading: false, sessionsError: null });
+        return;
+      }
+      // TODO: Server mode currently creates a shell copy only. Deep duplication
+      // of tables/orders/payments should be added after those stores migrate.
+      const copy = await repositories.sessions.create({ name: `${source.name} Copy` });
+      set((state) => ({
+        sessions: [copy, ...state.sessions.filter((session) => session.id !== copy.id)],
+        sessionsLoading: false,
+        sessionsError: null,
+      }));
+    } catch (error) {
+      setSessionFailure(set, error);
+      throw error;
+    }
   },
-  touchSession: (id) => {
+  touchSession: async (id) => {
+    // Backend Phase 13A does not store last-accessed data yet, so server mode
+    // keeps this as a local dashboard UX update only.
     const nextSessions = get().sessions.map((session) =>
       session.id === id
         ? { ...session, lastAccessedAt: new Date().toISOString() }
         : session,
     );
-    writeStoredSessions(nextSessions);
+    if (getPosRepositoryMode() === "local") writeLocalSessions(nextSessions);
     set({ sessions: nextSessions });
   },
   setSort: (sortKey) => set({ sortKey }),

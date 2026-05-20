@@ -43,7 +43,9 @@ function mapMergeGroupDto(dto: PosTableMergeGroupDto): TableMergeGroup {
 export const serverPosRepositories: PosRepositories = {
   sessions: {
     async list() {
-      return (await posClient.listPosSessions()).map(mapPosSessionDtoToBusinessSession);
+      return (await posClient.listPosSessions())
+        .filter((session) => session.status !== "closed" && session.status !== "archived")
+        .map(mapPosSessionDtoToBusinessSession);
     },
     async create(payload) {
       return mapPosSessionDtoToBusinessSession(await posClient.createPosSession(payload));
