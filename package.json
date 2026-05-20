@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "finish:harness": "node scripts/finish-task-harness.mjs",
     "start": "next start",
     "lint": "next lint"
   },
